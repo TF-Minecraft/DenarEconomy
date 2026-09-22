@@ -12,11 +12,12 @@
     <url>tfminecraft.net</url>
 
     <properties>
+        <tlibs.version>1.0-legacy-d8062cdca816</tlibs.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <tfmc.refs>${project.basedir}/libs</tfmc.refs>
-        <tfmc.tlibs>${project.basedir}/libs</tfmc.tlibs>
+
     </properties>
 
     <dependencies>
@@ -49,11 +50,14 @@
             <systemPath>${tfmc.refs}/MythicLib-1.7.jar</systemPath>
         </dependency>
         <dependency>
-            <groupId>local</groupId>
-            <artifactId>TLibs</artifactId>
-            <version>1.0</version>
-            <scope>system</scope>
-            <systemPath>${tfmc.tlibs}/TLibs.jar</systemPath>
+            <groupId>me.plugins</groupId>
+            <artifactId>tlibs</artifactId>
+            <version>${tlibs.version}</version>
+            <scope>provided</scope>
+            <exclusions>
+                <!-- The server supplies TLibs and its integrations. -->
+                <exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
