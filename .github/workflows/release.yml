@@ -14,7 +14,5 @@ jobs:
     uses: ./.github/workflows/maven-release.yml
     with:
       java-version: '21'
-      # Exact path, not a glob. {version} is replaced with the tag without v.
-      artifact-path: target/denareconomy-{version}.jar
     secrets:
       DEPS_TOKEN: ${{ secrets.DEPS_TOKEN }}
