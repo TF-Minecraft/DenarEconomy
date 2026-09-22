@@ -22,9 +22,9 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Install shared plugin dependencies
-        uses: TF-Minecraft/TLibs/.github/actions/setup-plugins@7afa185bee605908a99ac55288ed27a3babbad62
+        uses: TF-Minecraft/TLibs/.github/actions/setup-plugins@c19d797eb3565838790089af59e5e5028fc56576
         with:
-          mode: latest
+          mode: pinned
 
       - name: Prepare pinned dependencies
         env:
