@@ -91,6 +91,8 @@ public class MoneyManager implements Listener{
 		to.change(amount);
 	}
 
+	// Keep the existing legacy text representation, formatting, and exact-string comparisons.
+	@SuppressWarnings("deprecation")
 	public void showPouch(Player p) {
 		UUID uuid = p.getUniqueId();
 
@@ -585,6 +587,8 @@ public class MoneyManager implements Listener{
 		dropItems(null, victim.getLocation(), balance); // Drop money at death location
 	}
 	
+	// Keep the existing legacy text representation, formatting, and exact-string comparisons.
+	@SuppressWarnings("deprecation")
 	@EventHandler
 	public void coinSpawn(EntitySpawnEvent e) {
 		if(!(e.getEntity() instanceof Item)) return;
