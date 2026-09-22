@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project name="maven-antrun-" default="main">
-  <target name="main">
-    <copy file="D:\Dokumenter\My Plugins\VSCode Workspace\denareconomy\target/denareconomy-0.1.0.jar" tofile="D:\Dokumenter\My Plugins\TFMC\DenarEconomy\denareconomy-0.1.0.jar" />
-  </target>
-</project>

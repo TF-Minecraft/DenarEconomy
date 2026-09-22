@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -5,85 +6,96 @@
 
     <groupId>net.tfminecraft</groupId>
     <artifactId>denareconomy</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.8</version>
+
+    <name>DenarEconomy</name>
+    <url>tfminecraft.net</url>
 
     <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
+        <tfmc.refs>D:/Dokumenter/My Plugins/Reference Libs</tfmc.refs>
+        <tfmc.builds>D:/Dokumenter/My Plugins/TFMC/DenarEconomy</tfmc.builds>
+        <tfmc.tlibs>D:/Dokumenter/My Plugins/TFMC/TLibs</tfmc.tlibs>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>local</groupId>
-            <artifactId>api</artifactId>
-            <version>5.4</version>
+            <artifactId>spigot-api</artifactId>
+            <version>1.21.8</version>
             <scope>system</scope>
-            <systemPath>D:/Dokumenter/My Plugins/Reference Libs/api-5.4.jar</systemPath>
+            <systemPath>${tfmc.refs}/spigot-api.jar</systemPath>
+        </dependency>
+        <dependency>
+            <groupId>local</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.10.1</version>
+            <scope>system</scope>
+            <systemPath>${tfmc.refs}/gson-2.10.1.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>local</groupId>
             <artifactId>MMOItems</artifactId>
             <version>6.10</version>
             <scope>system</scope>
-            <systemPath>D:/Dokumenter/My Plugins/Reference Libs/MMOItems-6.10.jar</systemPath>
+            <systemPath>${tfmc.refs}/MMOItems-6.10.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>local</groupId>
             <artifactId>MythicLib</artifactId>
-            <version>1.6.1</version>
+            <version>1.7</version>
             <scope>system</scope>
-            <systemPath>D:/Dokumenter/My Plugins/Reference Libs/MythicLib-1.7.jar</systemPath>
-        </dependency>
-        <dependency>
-            <groupId>local</groupId>
-            <artifactId>spigot-api</artifactId>
-            <version>1.20.2-R0.1-SNAPSHOT</version>
-            <scope>system</scope>
-            <systemPath>D:/Dokumenter/My Plugins/Reference Libs/spigot-api-1.20.2-R0.1-SNAPSHOT.jar</systemPath>
-        </dependency>
-        <dependency>
-            <groupId>local</groupId>
-            <artifactId>json</artifactId>
-            <version>20220320</version>
-            <scope>system</scope>
-            <systemPath>D:/Dokumenter/My Plugins/Reference Libs/json-20220320.jar</systemPath>
-        </dependency>
-        <dependency>
-            <groupId>local</groupId>
-            <artifactId>json-simple</artifactId>
-            <version>1.1</version>
-            <scope>system</scope>
-            <systemPath>D:/Dokumenter/My Plugins/Reference Libs/json-simple-1.1.jar</systemPath>
+            <systemPath>${tfmc.refs}/MythicLib-1.7.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>local</groupId>
             <artifactId>TLibs</artifactId>
             <version>1.0</version>
             <scope>system</scope>
-            <systemPath>D:/Dokumenter/My Plugins/TFMC/TLibs/TLibs.jar</systemPath>
+            <systemPath>${tfmc.tlibs}/TLibs.jar</systemPath>
         </dependency>
         <dependency>
-            <groupId>local</groupId>
-            <artifactId>simplefactions</artifactId>
-            <version>2.2.5</version>
-            <scope>system</scope>
-            <systemPath>D:/Dokumenter/My Plugins/TFMC/SimpleFactions/simplefactions_2.2.5.jar</systemPath>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes><include>plugin.yml</include></includes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes><exclude>plugin.yml</exclude></excludes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
                 <executions>
                     <execution>
                         <phase>package</phase>
                         <goals><goal>run</goal></goals>
                         <configuration>
                             <target>
+                                <mkdir dir="${tfmc.builds}"/>
                                 <copy file="${project.build.directory}/${project.build.finalName}.jar"
-                                    tofile="D:\Dokumenter\My Plugins\TFMC\DenarEconomy\${project.build.finalName}.jar"/>
+                                    tofile="${tfmc.builds}/${project.build.finalName}.jar"/>
                             </target>
                         </configuration>
                     </execution>

@@ -1,6 +1,27 @@
-one_denar:
+# Denominations, largest to smallest. Anything with withdraw: false is accepted as money but
+# never handed out, so it cannot be produced as change either.
+gold_pouch:
+  item: m.currency.pouch_of_coins
+  value: 100.0
+gold_stack:
+  item: m.currency.stack_of_coins
+  value: 10.0
+gold_handful:
+  item: m.currency.handful_of_coins
+  value: 5.0
+gold_denar:
+  item: m.currency.gold_coin
+  value: 1.0
+silver_stack:
+  item: m.currency.silver_coin10
+  value: 0.1
+silver_handful:
+  item: m.currency.silver_coin5
+  value: 0.05
+silver_coin:
+  item: m.currency.silver_coin
+  value: 0.01
+gold_ingot:
   item: v.gold_ingot
   value: 1.0
-point_one_denar:
-  item: v.iron_ingot
-  value: 0.1
+  withdraw: false
