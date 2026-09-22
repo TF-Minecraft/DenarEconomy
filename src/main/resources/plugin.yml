@@ -1,4 +1,4 @@
-main: net.tfminecraft.DenarEconomy.DenarEconomy
+main: net.tfminecraft.denareconomy.DenarEconomy
 api-version: '1.21.10'
 name: DenarEconomy
 version: ${project.version}
