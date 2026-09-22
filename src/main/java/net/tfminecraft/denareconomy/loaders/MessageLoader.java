@@ -41,6 +41,8 @@ public class MessageLoader {
 	/**
 	 * Placeholders are passed as name/value pairs: get("bank.action", "action", "Deposited", "amount", 5.0).
 	 */
+	// Keep the existing legacy text representation, formatting, and exact-string comparisons.
+	@SuppressWarnings("deprecation")
 	public static String get(String path, Object... placeholders) {
 		String raw = config.getString(path);
 		if (raw == null) {
