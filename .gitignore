@@ -1,42 +1,50 @@
-# Ignore Maven target directory
-target
-
-# Ignore Eclipse/IntelliJ IDEA/NetBeans project files
-*.iml
-.idea/
-*.ipr
-*.iws
-*.bak
-*.swp
-*.tmp
-*.log
-*.class
-
-# NetBeans specific
-nbproject/private/
+# Build output
+target/
 build/
-nbbuild/
+out/
 dist/
+nbbuild/
 nbdist/
-.nb-gradle/
+*.class
+dependency-reduced-pom.xml
 
-# Eclipse specific
-.project
-.classpath
-.settings/
-
-# OS-specific files
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-# Plugin build artifacts
+# Build dependencies
+/.build/
 /*.jar
-
-# Downloaded build dependencies
 /libs/*.jar
 !/libs/TLibs.jar
 
-# Resolved build dependency metadata
-.build/
+# Python caches and environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# IDE files
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.project
+.classpath
+.settings/
+nbproject/private/
+.nb-gradle/
+
+# Logs and temporary files
+*.log
+hs_err_pid*
+replay_pid*
+*.bak
+*.swp
+*.tmp
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local investigation notes and test artifacts
+/.scratch/
