@@ -38,7 +38,6 @@ import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
 import net.tfminecraft.tlibs.TLibs;
-import net.tfminecraft.tlibs.enums.APIType;
 import net.tfminecraft.tlibs.objects.api.ItemAPI;
 import net.Indyuce.mmoitems.MMOItems;
 import net.tfminecraft.denareconomy.DenarEconomy;
@@ -75,7 +74,7 @@ public class MoneyManager implements Listener{
 
 	
 	public Coin getCoin(ItemStack i) {
-		ItemAPI api = (ItemAPI) TLibs.getApiInstance(APIType.ITEM_API);
+		ItemAPI api = TLibs.getItemAPI();
 		for(Coin c : CoinLoader.get()) {
 			if(api.getChecker().checkItemWithPath(i, c.getItem())) return c;
 		}

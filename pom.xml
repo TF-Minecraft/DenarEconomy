@@ -14,7 +14,6 @@
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <tfmc.refs>${project.basedir}/libs</tfmc.refs>
         <tlibs.version>2.0.0</tlibs.version>
     </properties>
 
@@ -28,23 +27,20 @@
         <dependency>
             <groupId>local</groupId>
             <artifactId>gson</artifactId>
-            <version>2.10.1</version>
-            <scope>system</scope>
-            <systemPath>${tfmc.refs}/gson-2.10.1.jar</systemPath>
+            <version>2.10.1-tfmc-4241c14a7727</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>local</groupId>
             <artifactId>MMOItems</artifactId>
-            <version>6.10</version>
-            <scope>system</scope>
-            <systemPath>${tfmc.refs}/MMOItems-6.10.jar</systemPath>
+            <version>6.10-tfmc-c84700df5942</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>local</groupId>
             <artifactId>MythicLib</artifactId>
-            <version>1.7</version>
-            <scope>system</scope>
-            <systemPath>${tfmc.refs}/MythicLib-1.7.jar</systemPath>
+            <version>1.7-tfmc-660ff2a6ec86</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>me.plugins</groupId>
