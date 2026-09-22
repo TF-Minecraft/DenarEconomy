@@ -40,6 +40,9 @@ jobs:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
 
+      - name: Install pinned TLibs in Maven
+        uses: TF-Minecraft/TLibs/.github/actions/setup@804728d2c0d62d64e3194bcdeffc3708acfbc514
+
       - name: Validate release version
         env:
           TAG: ${{ github.ref_name }}

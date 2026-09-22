@@ -21,6 +21,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Install pinned TLibs in Maven
+        uses: TF-Minecraft/TLibs/.github/actions/setup@804728d2c0d62d64e3194bcdeffc3708acfbc514
+
       - name: Prepare pinned dependencies
         env:
           GH_TOKEN: ${{ secrets.DEPS_TOKEN }}
