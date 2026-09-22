@@ -40,10 +40,10 @@ jobs:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
 
-      - name: Install latest stable TLibs in Maven
-        uses: TF-Minecraft/TLibs/.github/actions/setup@5da8e77d0e0696bbff7d7064a2644072da9c6428
+      - name: Install shared plugin dependencies
+        uses: TF-Minecraft/TLibs/.github/actions/setup-plugins@7afa185bee605908a99ac55288ed27a3babbad62
         with:
-          version: latest
+          mode: latest
 
       - name: Validate release version
         env:
@@ -102,6 +102,7 @@ jobs:
               'commit': os.environ['GITHUB_SHA'],
               'tag': os.environ['TAG'],
               'run': f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              'plugin_dependencies': json.loads(pathlib.Path('.build/plugin-dependencies.json').read_text()),
               'artifact': source.name,
               'sha256': digest,
           }, indent=2) + '\n')

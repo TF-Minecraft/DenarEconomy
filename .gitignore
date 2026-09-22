@@ -37,3 +37,6 @@ Thumbs.db
 # Downloaded build dependencies
 /libs/*.jar
 !/libs/TLibs.jar
+
+# Resolved build dependency metadata
+.build/
