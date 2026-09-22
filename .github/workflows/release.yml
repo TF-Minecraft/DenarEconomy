@@ -13,7 +13,7 @@ jobs:
       contents: write
     uses: ./.github/workflows/maven-release.yml
     with:
-      java-version: '25'
+      java-version: '21'
       # Exact path, not a glob. {version} is replaced with the tag without v.
       artifact-path: target/denareconomy-{version}.jar
     secrets:
