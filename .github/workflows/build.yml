@@ -21,10 +21,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Install latest stable TLibs in Maven
-        uses: TF-Minecraft/TLibs/.github/actions/setup@5da8e77d0e0696bbff7d7064a2644072da9c6428
+      - name: Install shared plugin dependencies
+        uses: TF-Minecraft/TLibs/.github/actions/setup-plugins@cdbfa38a73507d821e9f68561b807a2dd525e4b5
         with:
-          version: latest
+          mode: latest
 
       - name: Prepare pinned dependencies
         env:
@@ -48,7 +48,10 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.dev.outputs.name }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ steps.dev.outputs.jar }}
+          path: |
+            ${{ steps.dev.outputs.jar }}
+            .build/plugin-dependencies.json
+          include-hidden-files: true
           if-no-files-found: error
 
       - name: Upload unit test reports
