@@ -1,0 +1,48 @@
+# All player-facing text.
+# Colours: & codes (&a, &e, &6) and #rrggbb hex both work.
+# %prefix% expands to the prefix below; the other %placeholders% are filled in by the plugin.
+
+prefix: "&a[DenarEconomy] "
+
+general:
+  players-only: "Only players can use this command."
+  unknown-subcommand: "%prefix%&cUnknown subcommand or wrong usage."
+  reload-ok: "%prefix%&aReloaded coins, drops, and messages."
+
+errors:
+  no-amount: "%prefix%&cNo amount specified"
+  invalid-amount: "%prefix%&cInvalid amount"
+  not-enough-pouch: "#a33d1dNot enough funds in pouch"
+  not-enough-bank: "#a33d1dNot enough funds in bank"
+  pouch-cooldown: "%prefix%&cWait %seconds%s before using that again."
+  item-chain-broken: "Error: First money item not initialized."
+  no-permission: "%prefix%&cYou do not have permission to do that."
+  unknown-coin: "%prefix%&cUnknown coin."
+  invalid-count: "%prefix%&cAmount must be a whole number of coins."
+
+balance:
+  pouch: "#3ce8c9Current Pouch Balance: #b39122%amount%#dbaf1dd"
+  bank: "#3ce8c9Current Bank Balance: #b39122%amount%#dbaf1dd"
+
+pouch:
+  showing: "&6Showing %amount%d..."
+  hologram: "&6Balance: %amount%d"
+
+baltop:
+  header: "&e========== &6[Balance Top %limit%] &e=========="
+  entry: "&a%rank% &e%name% &7- #b39122%amount%#dbaf1dd"
+  footer: "&e=================================="
+
+bank:
+  header: "&e============&6[Bank Report]&e=============="
+  action: "#6ab05a%action%: #b39122%amount%#dbaf1dd"
+  new-bank: "#3ce8c9New Bank Balance: #b39122%amount%#dbaf1dd"
+  new-pouch: "#3ce8c9New Pouch Balance: #b39122%amount%#dbaf1dd"
+  footer: "&e====================================="
+  deposited: "Deposited"
+  withdrew: "Withdrew"
+
+money:
+  earned: "#dbaf1d+#b39122%amount%#dbaf1dd"
+  tax: "#44524f(%tax% in tax)"
+  coin-name: "#b39122%amount%#dbaf1dd"

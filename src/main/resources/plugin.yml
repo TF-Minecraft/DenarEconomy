@@ -1,12 +1,20 @@
-main: net.tfminecraft.denareconomy.DenarEconomy
+main: net.tfminecraft.DenarEconomy.DenarEconomy
 api-version: 1.20
 name: DenarEconomy
 version: ${project.version}
 author: Drefvelin
 
-depend: [MMOCore, MMOItems, MythicLib]
+depend: [MMOItems, MythicLib, TLibs]
 
 commands:
   deco:
-      useage: /<command>
+      usage: /<command>
       description: Economy Command
+  pouch:
+      usage: /<command>
+      description: Pouch Command
+
+permissions:
+  denareconomy.reload:
+    description: Reload DenarEconomy configs
+    default: op

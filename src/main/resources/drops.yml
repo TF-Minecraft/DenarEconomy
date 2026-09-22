@@ -1,0 +1,5 @@
+fortune-strength: 0.33
+
+stone:
+  chance: 0.1
+  amount: 0.1-0.2

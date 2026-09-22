@@ -1,6 +1,0 @@
-one_denar:
-  item: v.gold_ingot
-  value: 1.0
-point_one_denar:
-  item: v.iron_ingot
-  value: 0.1
