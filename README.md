@@ -14,6 +14,8 @@ python3 ../tlibs/tools/install-dependency.py --pom pom.xml
 mvn clean verify
 ```
 
-See [TLibs dependency setup](https://github.com/TF-Minecraft/TLibs/blob/804728d2c0d62d64e3194bcdeffc3708acfbc514/DEPENDENCIES.md)
-for private-source access, offline installation and the pinned binary versions.
+See [TLibs dependency setup](https://github.com/TF-Minecraft/TLibs/blob/v1.1.0/DEPENDENCIES.md)
+for public release installation, offline builds and rollback.
 Other declared build dependencies still need their usual preparation.
+
+Builds and server runtime require Java 25 and [TLibs 1.1.0](https://github.com/TF-Minecraft/TLibs/releases/tag/v1.1.0).
