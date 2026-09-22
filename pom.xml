@@ -15,9 +15,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
-        <tfmc.refs>D:/Dokumenter/My Plugins/Reference Libs</tfmc.refs>
-        <tfmc.builds>D:/Dokumenter/My Plugins/TFMC/DenarEconomy</tfmc.builds>
-        <tfmc.tlibs>D:/Dokumenter/My Plugins/TFMC/TLibs</tfmc.tlibs>
+        <tfmc.refs>${project.basedir}/libs</tfmc.refs>
+        <tfmc.tlibs>${project.basedir}/libs</tfmc.tlibs>
     </properties>
 
     <dependencies>
@@ -82,24 +81,6 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-antrun-plugin</artifactId>
-                <version>3.1.0</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals><goal>run</goal></goals>
-                        <configuration>
-                            <target>
-                                <mkdir dir="${tfmc.builds}"/>
-                                <copy file="${project.build.directory}/${project.build.finalName}.jar"
-                                    tofile="${tfmc.builds}/${project.build.finalName}.jar"/>
-                            </target>
-                        </configuration>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

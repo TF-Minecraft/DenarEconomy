@@ -31,5 +31,9 @@ Thumbs.db
 
 # Logs
 *.log
-# Built plugin jar copied to repo root by antrun
+# Plugin build artifacts
 /*.jar
+
+# Downloaded build dependencies
+/libs/*.jar
+!/libs/TLibs.jar
