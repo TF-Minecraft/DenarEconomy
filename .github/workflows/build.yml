@@ -20,9 +20,9 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - name: Install pinned TLibs in Maven
-        uses: TF-Minecraft/TLibs/.github/actions/setup@804728d2c0d62d64e3194bcdeffc3708acfbc514
+        uses: TF-Minecraft/TLibs/.github/actions/setup@905a196217471252b96be5ecf8eeb16c9e85e41d
 
       - name: Prepare pinned dependencies
         env:

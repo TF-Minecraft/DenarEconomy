@@ -12,7 +12,7 @@
     <url>tfminecraft.net</url>
 
     <properties>
-        <tlibs.version>1.0-legacy-d8062cdca816</tlibs.version>
+        <tlibs.version>1.1.0</tlibs.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
