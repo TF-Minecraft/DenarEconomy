@@ -36,6 +36,5 @@ python3 ../tlibs/tools/install-plugins.py --pom pom.xml
 ```
 
 Prepare any remaining third-party inputs with `.github/scripts/prepare-release.sh`
-before running Maven. Source-unavailable AdvancedCrafting and MusicalInstruments
-inputs remain private and checksum-pinned wherever declared; see the installer
+before running Maven. Any source-unavailable inputs remain private and checksum-pinned wherever declared; see the installer
 documentation for authentication and reproducible rebuilds.
