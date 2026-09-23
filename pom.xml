@@ -28,19 +28,19 @@
         <dependency>
             <groupId>local</groupId>
             <artifactId>gson</artifactId>
-            <version>2.10.1-tfmc-4241c14a7727</version>
+            <version>2.14.0-tfmc-2cbd119bf196</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>local</groupId>
             <artifactId>MMOItems</artifactId>
-            <version>6.10-tfmc-c84700df5942</version>
+            <version>6.10.1-SNAPSHOT-tfmc-a37f7789fcdc</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>local</groupId>
             <artifactId>MythicLib</artifactId>
-            <version>1.7-tfmc-660ff2a6ec86</version>
+            <version>1.7.1-SNAPSHOT-tfmc-225aa7f75d4e</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
