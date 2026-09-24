@@ -22,7 +22,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Install shared plugin dependencies
-        uses: TF-Minecraft/TLibs/.github/actions/setup-plugins@4f7a3545063cb2e8d06a034687c817ab863f0835
+        uses: TF-Minecraft/TLibs/.github/actions/setup-plugins@8ef41de589f121c98ff892b10696e7c1feb4ca74
         with:
           mode: pinned
 
@@ -38,9 +38,9 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             dev_version="DEV-$(date -u +%Y%m%d-%H%M)"
           fi
-          mvn -B --no-transfer-progress -P'!deploy-live' org.codehaus.mojo:versions-maven-plugin:2.22.0:set \
+          mvn -B --no-transfer-progress org.codehaus.mojo:versions-maven-plugin:2.22.0:set \
             -DnewVersion="$dev_version" -DgenerateBackupPoms=false
-          mvn -B --no-transfer-progress -P'!deploy-live' help:evaluate \
+          mvn -B --no-transfer-progress help:evaluate \
             -Dexpression=project.build.finalName -Doutput="$RUNNER_TEMP/final-name"
           final_name=$(cat "$RUNNER_TEMP/final-name")
           [[ "$final_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || exit 1
@@ -49,7 +49,7 @@ jobs:
           echo "jar=target/$final_name.jar" >> "$GITHUB_OUTPUT"
 
       - name: Run unit tests and build
-        run: mvn -B --no-transfer-progress -P'!deploy-live' clean verify -DskipTests=false -Dmaven.test.skip=false
+        run: mvn -B --no-transfer-progress clean verify -DskipTests=false -Dmaven.test.skip=false
 
       - name: Verify runtime JAR
         env:
