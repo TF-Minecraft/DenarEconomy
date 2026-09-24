@@ -1,5 +1,6 @@
 package net.tfminecraft.denareconomy.managers;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -87,9 +88,15 @@ public class MoneyManager implements Listener{
 		return Math.round(v)/100.0;
 	}
 	
+	/** Retains the existing API; invalid amounts and unfunded transfers are ignored. */
 	public static void transfer(Account from, Account to, double amount) {
-		from.change(amount*-1);
-		to.change(amount);
+		if (!Double.isFinite(amount)) return;
+		transfer(from, to, BigDecimal.valueOf(amount));
+	}
+
+	/** Transfers whole cents exactly, returning false without mutation on rejection. */
+	public static boolean transfer(Account from, Account to, BigDecimal amount) {
+		return from != null && from.transferTo(to, amount);
 	}
 
 	// Keep the existing legacy text representation, formatting, and exact-string comparisons.
