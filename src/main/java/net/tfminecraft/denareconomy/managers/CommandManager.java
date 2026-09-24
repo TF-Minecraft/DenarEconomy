@@ -1,5 +1,6 @@
 package net.tfminecraft.denareconomy.managers;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -206,6 +207,17 @@ public class CommandManager implements CommandExecutor, TabCompleter {
         }
     }
 
+    /** Parses the original command token without rounding fractional cents through double. */
+    static BigDecimal parseBankAmount(String token) {
+        if (token == null) return null;
+        try {
+            BigDecimal amount = new BigDecimal(token);
+            return Account.isValidTransferAmount(amount) ? amount.setScale(2) : null;
+        } catch (NumberFormatException | ArithmeticException ex) {
+            return null;
+        }
+    }
+
     private void handleDeposit(Player p, String[] args) {
         PlayerBankPulseEvent event = new PlayerBankPulseEvent(p);
 		Bukkit.getPluginManager().callEvent(event);
@@ -216,20 +228,19 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             return;
         }
 
-        Double amount = ParseUtils.parseDouble(args[1]);
+        BigDecimal amount = parseBankAmount(args[1]);
 
-        if (!ParseUtils.isPositive(amount)) {
+        if (amount == null) {
             MessageLoader.send(p, "errors.invalid-amount");
             return;
         }
 
         PlayerData pd = DenarEconomy.getPlayerManager().get(p);
-        if (pd.getPouch().getBal() < amount) {
+        if (!MoneyManager.transfer(pd.getPouch(), pd.getBank(), amount)) {
             MessageLoader.send(p, "errors.not-enough-pouch");
             return;
         }
 
-        MoneyManager.transfer(pd.getPouch(), pd.getBank(), amount);
         sendBankReport(p, MessageLoader.get("bank.deposited"), amount, pd);
     }
 
@@ -243,24 +254,23 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             return;
         }
 
-        Double amount = ParseUtils.parseDouble(args[1]);
+        BigDecimal amount = parseBankAmount(args[1]);
 
-        if (!ParseUtils.isPositive(amount)) {
+        if (amount == null) {
             MessageLoader.send(p, "errors.invalid-amount");
             return;
         }
 
         PlayerData pd = DenarEconomy.getPlayerManager().get(p);
-        if (pd.getBank().getBal() < amount) {
+        if (!MoneyManager.transfer(pd.getBank(), pd.getPouch(), amount)) {
             MessageLoader.send(p, "errors.not-enough-bank");
             return;
         }
 
-        MoneyManager.transfer(pd.getBank(), pd.getPouch(), amount);
         sendBankReport(p, MessageLoader.get("bank.withdrew"), amount, pd);
     }
 
-    private void sendBankReport(Player p, String action, double amount, PlayerData pd) {
+    private void sendBankReport(Player p, String action, BigDecimal amount, PlayerData pd) {
         MessageLoader.send(p, "bank.header");
         MessageLoader.send(p, "bank.action", "action", action, "amount", amount);
         MessageLoader.send(p, "bank.new-bank", "amount", pd.getBank().getBal());
