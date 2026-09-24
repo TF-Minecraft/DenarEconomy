@@ -10,6 +10,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
+import net.tfminecraft.denareconomy.accounts.OfflineModifier;
 import net.tfminecraft.denareconomy.data.PlayerData;
 import net.tfminecraft.denareconomy.database.Database;
 
@@ -31,6 +32,25 @@ public class PlayerManager implements Listener{
 	public PlayerData get(UUID id) {
 		if(!exists(id)) add(id);
 		return data.get(id);
+	}
+
+	/** Session copy only. Does not load an offline player into the session. */
+	public PlayerData peek(UUID id) {
+		return data.get(id);
+	}
+
+	public void keep(PlayerData playerData) {
+		if (playerData == null || playerData.getId() == null) {
+			return;
+		}
+		data.put(playerData.getId(), playerData);
+	}
+
+	/** Forget a session copy without writing it. The caller has already saved. */
+	public void drop(UUID id) {
+		if (id != null) {
+			data.remove(id);
+		}
 	}
 	
 	public void add(UUID id) {
@@ -60,6 +80,7 @@ public class PlayerManager implements Listener{
 	public void onJoin(PlayerJoinEvent e) {
 		Player p = e.getPlayer();
 		init(p);
+		OfflineModifier.remember(p.getName(), p.getUniqueId());
 	}
 
 	@EventHandler

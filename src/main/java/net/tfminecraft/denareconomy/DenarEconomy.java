@@ -7,6 +7,7 @@ import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import net.tfminecraft.denareconomy.accounts.OfflineModifier;
 import net.tfminecraft.denareconomy.database.Database;
 import net.tfminecraft.denareconomy.loaders.CoinLoader;
 import net.tfminecraft.denareconomy.loaders.DropLoader;
@@ -40,6 +41,10 @@ public class DenarEconomy extends JavaPlugin {
 		getCommand(commands.cmd1).setTabCompleter(commands);
 		getCommand(commands.cmd2).setTabCompleter(commands);
 		playerManager.start();
+		OfflineModifier.load();
+		for (Player p : Bukkit.getOnlinePlayers()) {
+			OfflineModifier.remember(p.getName(), p.getUniqueId());
+		}
 	}
 
 	@Override

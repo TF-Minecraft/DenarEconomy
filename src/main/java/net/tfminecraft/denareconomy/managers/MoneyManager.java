@@ -41,6 +41,7 @@ import net.tfminecraft.tlibs.TLibs;
 import net.tfminecraft.tlibs.objects.api.ItemAPI;
 import net.Indyuce.mmoitems.MMOItems;
 import net.tfminecraft.denareconomy.DenarEconomy;
+import net.tfminecraft.denareconomy.accounts.OfflineModifier;
 import net.tfminecraft.denareconomy.data.Account;
 import net.tfminecraft.denareconomy.data.PlayerData;
 import net.tfminecraft.denareconomy.database.Database;
@@ -207,42 +208,26 @@ public class MoneyManager implements Listener{
 	}
 
 	public double getBalance(Accounts account, UUID player) {
-		PlayerData pd = pm.get(player);
-		if(pd == null) return Database.getPlayerBalance(player, account);
-		Account acc = null;
-		switch (account) {
-			case POUCH:
-				acc = pd.getPouch();
-				break;
-			case BANK:
-				acc = pd.getBank();
-				break;
-			default:
-				break;
-		}
-		if(acc == null) return 0.0;
-		return acc.getBal();
+		return OfflineModifier.balance(player, account);
 	}
 
+	/**
+	 * Signed change. Other plugins that only have a player name should use
+	 * {@link OfflineModifier} so an offline player is not written to a stand-in account.
+	 * This form still accepts a negative balance, matching older callers that already
+	 * checked the funds themselves.
+	 */
 	public void changeBal(String id, double amount, Accounts a){
-		PlayerData pd = pm.get(UUID.fromString(id));
-		Account account = null;
-		switch (a) {
-			case POUCH:
-				account = pd.getPouch();
-				break;
-			case BANK:
-				account = pd.getBank();
-				break;
-			default:
-				break;
+		if (id == null || a == null || amount == 0.0) {
+			return;
 		}
-		if(account == null) return;
-		account.change(amount);
-		Player p = Bukkit.getPlayer(UUID.fromString(id));
-		if(p == null) {
-			pm.save(UUID.fromString(id));
+		UUID playerId;
+		try {
+			playerId = UUID.fromString(id);
+		} catch (IllegalArgumentException ex) {
+			return;
 		}
+		OfflineModifier.change(playerId, a, amount);
 	}
 
 	public void addMoneyToAccount(String id, double amount, boolean silent, boolean taxable, Accounts a) {
