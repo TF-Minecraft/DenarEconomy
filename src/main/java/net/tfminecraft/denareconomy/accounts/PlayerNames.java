@@ -65,7 +65,7 @@ public final class PlayerNames {
 				return;
 			}
 			for (Map.Entry<String, String> entry : raw.entrySet()) {
-				if (entry.getKey() == null || entry.getValue() == null) {
+				if (entry.getValue() == null) {
 					continue;
 				}
 				try {
@@ -153,7 +153,7 @@ public final class PlayerNames {
 				best = row;
 			}
 		}
-		return best == null ? null : best.id();
+		return best.id();
 	}
 
 	public static List<CachedName> parseUserCache(String json) {

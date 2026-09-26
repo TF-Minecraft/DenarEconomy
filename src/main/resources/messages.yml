@@ -19,6 +19,7 @@ errors:
   no-permission: "%prefix%&cYou do not have permission to do that."
   unknown-coin: "%prefix%&cUnknown coin."
   invalid-count: "%prefix%&cAmount must be a whole number of coins."
+  coins-unavailable: "%prefix%&cCannot create coins for this amount. Your pouch has not been charged."
 
 balance:
   pouch: "#3ce8c9Current Pouch Balance: #b39122%amount%#dbaf1dd"

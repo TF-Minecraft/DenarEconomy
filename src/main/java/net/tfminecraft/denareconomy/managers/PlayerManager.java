@@ -1,6 +1,8 @@
 package net.tfminecraft.denareconomy.managers;
 
 import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.logging.Level;
 import java.util.UUID;
 
 import org.bukkit.Bukkit;
@@ -76,6 +78,17 @@ public class PlayerManager implements Listener{
 		data.remove(id);
 	}
 	
+	/** Retry every retained account, including players whose quit save failed. */
+	public void saveAll() {
+		for (UUID id : new ArrayList<>(data.keySet())) {
+			try {
+				save(id);
+			} catch (RuntimeException failure) {
+				Bukkit.getLogger().log(Level.SEVERE, "Could not save account " + id + "; retained for retry", failure);
+			}
+		}
+	}
+
 	@EventHandler
 	public void onJoin(PlayerJoinEvent e) {
 		Player p = e.getPlayer();

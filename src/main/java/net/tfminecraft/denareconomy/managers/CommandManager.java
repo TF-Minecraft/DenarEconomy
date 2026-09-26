@@ -131,14 +131,14 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             return;
         }
 
-        Double amount = ParseUtils.parseDouble(args[1]);
+        BigDecimal amount = parseBankAmount(args[1]);
 
-        if (!ParseUtils.isPositive(amount)) {
+        if (amount == null) {
             MessageLoader.send(p, "errors.invalid-amount");
             return;
         }
 
-        DenarEconomy.getMoneyManager().pay(p, amount);
+        DenarEconomy.getMoneyManager().pay(p, amount.doubleValue());
     }
 
     private void handleToItem(Player p, String[] args) {
@@ -149,7 +149,7 @@ public class CommandManager implements CommandExecutor, TabCompleter {
 
         Double amount = ParseUtils.parseDouble(args[1]);
 
-        if (!ParseUtils.isPositive(amount)) {
+        if (!ParseUtils.isPositive(amount) || !Double.isFinite(amount)) {
             MessageLoader.send(p, "errors.invalid-amount");
             return;
         }
@@ -172,12 +172,23 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             cost = count * coin.getValue();
             items = DenarEconomy.getMoneyManager().coinItems(coin, count);
         } else {
-            cost = amount;
-            items = DenarEconomy.getMoneyManager().amountToItems(amount);
+            BigDecimal exactAmount = parseBankAmount(args[1]);
+            if (exactAmount == null) {
+                MessageLoader.send(p, "errors.invalid-amount");
+                return;
+            }
+            cost = exactAmount.doubleValue();
+            // A one-cent floor requires an exact plan, unlike world drops with a custom total value.
+            items = DenarEconomy.getMoneyManager().amountToItems(cost, 0.0, 0.01);
         }
 
         if (pouch.getBal() < cost) {
             MessageLoader.send(p, "errors.not-enough-pouch");
+            return;
+        }
+
+        if (items.isEmpty()) {
+            MessageLoader.send(p, "errors.coins-unavailable");
             return;
         }
 
@@ -199,10 +210,8 @@ public class CommandManager implements CommandExecutor, TabCompleter {
 
     private static void giveItems(Player p, List<ItemStack> items) {
         for (ItemStack i : items) {
-            if (p.getInventory().firstEmpty() == -1) {
-                p.getWorld().dropItem(p.getLocation(), i);
-            } else {
-                p.getInventory().addItem(i);
+            for (ItemStack remaining : p.getInventory().addItem(i).values()) {
+                p.getWorld().dropItem(p.getLocation(), remaining);
             }
         }
     }

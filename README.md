@@ -21,6 +21,42 @@ The plugin also supplies the shared economy used by other TF-Minecraft systems, 
 
 Technical documentation is maintained in [TF-Minecraft/Docs](https://github.com/TF-Minecraft/Docs).
 
+## Tests and coverage
+
+With Java 21 and the pinned dependencies installed (the same preparation used in
+`.github/workflows/build.yml`), run:
+
+```sh
+mvn -B --no-transfer-progress clean verify
+```
+
+JaCoCo reports all production classes, without coverage exclusions. Open
+`target/site/jacoco/index.html` for the HTML report; `jacoco.xml` and `jacoco.csv`
+are in the same directory. CI uploads the report as a `coverage-report` artifact.
+Tests use MockBukkit, Mockito, and real temporary files; legacy relative database
+paths are isolated under `target/test-runtime`. Run Maven invocations sequentially
+within a checkout because they share the build directory.
+
+The suite reaches **100% line, branch, and instruction coverage** across all
+30 production classes. `verify` enforces 100% for each of these metrics.
+Redundant private checks and unreachable enum defaults have been simplified;
+public APIs and money-drop recovery checks remain. Fault-injection tests cover
+the recovery paths even when an adapter violates Bukkit's non-null contracts.
+Regression tests prevent fractional-cent withdrawals from creating forbidden
+overdrafts, reject fractional-cent payments/conversions, preserve pouch balances
+when a payment, conversion, or PvP death cannot produce coins, and honor cancelled
+coin pickups. Conversions require exact change and drop inventory overflow.
+Taxable earnings retain their full value unless a listener explicitly sets tax.
+Account I/O errors propagate instead of creating zero balances or discarding unsaved
+sessions. Saves write a temporary sibling and require atomic replacement; failed
+offline changes restore the prior balance. Shutdown retries all retained accounts
+and continues after individual failures. Persistent storage failures still require
+operator attention before the server process exits; retained memory is not durable.
+
+These tests validate plugin logic and simulated Bukkit interactions, not a live
+Paper server or the internals of MMOItems/TLibs. The filesystem permission cases
+require POSIX permissions and an unprivileged user, as provided by CI.
+
 ## License
 
 Copyright (c) 2026 TF-Minecraft contributors.

@@ -2,10 +2,14 @@ package net.tfminecraft.denareconomy.database;
 
 import java.io.File;
 import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -22,20 +26,33 @@ public class Database {
     private static final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private static final File dataDir = new File("plugins/DenarEconomy/PlayerData");
 
+    /** Returns only after a complete replacement; failures leave the previous file intact. */
     public static void savePlayerData(PlayerData data) {
-        if (!dataDir.exists()) dataDir.mkdirs();
-
-        File file = new File(dataDir, data.getId().toString() + ".json");
-        try (Writer writer = new FileWriter(file)) {
-            gson.toJson(data, writer);
+        Path file = dataDir.toPath().resolve(data.getId().toString() + ".json");
+        String json = gson.toJson(data);
+        try {
+            Files.createDirectories(dataDir.toPath());
+            Path temporary = Files.createTempFile(dataDir.toPath(), data.getId() + "-", ".tmp");
+            try {
+                Files.writeString(temporary, json);
+                // Fail closed if atomic replacement is unavailable on this filesystem.
+                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException e) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException cleanup) {
+                    e.addSuppressed(cleanup);
+                }
+                throw e;
+            }
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new UncheckedIOException("Could not save account " + data.getId(), e);
         }
     }
 
     public static PlayerData loadPlayerData(UUID player) {
         File file = new File(dataDir, player.toString() + ".json");
-        if (!file.exists()) {
+        if (!hasPlayerData(player)) {
             return new PlayerData(player);
         }
 
@@ -43,26 +60,28 @@ public class Database {
             PlayerData data = gson.fromJson(reader, PlayerData.class);
             return data;
         } catch (IOException e) {
-            e.printStackTrace();
-            return new PlayerData(player); // Fallback
+            throw new UncheckedIOException("Could not load account " + player, e);
         }
     }
 
     public static double getPlayerBalance(UUID player, Accounts account) {
         PlayerData data = loadPlayerData(player);
-        switch (account) {
-            case POUCH:
-                return data.getPouch().getBal();
-            case BANK:
-                return data.getBank().getBal();
-            default:
-                return 0.0;
-        }
+        return switch (account) {
+            case POUCH -> data.getPouch().getBal();
+            case BANK -> data.getBank().getBal();
+        };
     }
 
     public static boolean hasPlayerData(UUID id) {
         File file = new File(dataDir, id.toString() + ".json");
-        return file.exists();
+        try {
+            Files.readAttributes(file.toPath(), BasicFileAttributes.class);
+            return true;
+        } catch (NoSuchFileException e) {
+            return false;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not inspect account " + id, e);
+        }
     }
 
     public static double getTotalAmount(Accounts account) {
@@ -76,14 +95,10 @@ public class Database {
         for (File file : files) {
             try (Reader reader = new FileReader(file)) {
                 PlayerData data = gson.fromJson(reader, PlayerData.class);
-                switch (account) {
-                    case POUCH:
-                        total += data.getPouch().getBal();
-                        break;
-                    case BANK:
-                        total += data.getBank().getBal();
-                        break;
-                }
+                total += switch (account) {
+                    case POUCH -> data.getPouch().getBal();
+                    case BANK -> data.getBank().getBal();
+                };
             } catch (IOException | NullPointerException e) {
                 e.printStackTrace(); // Optional: log which file caused issues
             }

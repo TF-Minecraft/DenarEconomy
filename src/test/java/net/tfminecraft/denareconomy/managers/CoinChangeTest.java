@@ -111,4 +111,28 @@ class CoinChangeTest {
 			assertEquals(coin, CoinChange.value(LIVE, change), "break of " + coin);
 		}
 	}
+
+	@Test
+	void invalidDenominationsAreSkippedWithoutDividingByZeroOrCreatingMoney() {
+		List<Denom> configured = List.of(
+				new Denom("zero", 0, true),
+				new Denom("negative", -10, true),
+				new Denom("deposit-only", 10, false),
+				new Denom("large", 5, true),
+				new Denom("small", 1, true));
+		assertEquals(Map.of("small", 3L), CoinChange.plan(configured, 3, 0, 0));
+		assertEquals(Map.of("large", 1L), CoinChange.plan(configured, 5, 5, 5));
+		assertTrue(CoinChange.plan(configured, -1, 0, 0).isEmpty());
+	}
+
+	@Test
+	void uncappedSparseDenominationsPayRepresentablePartButLimitsRequireExactChange() {
+		List<Denom> sparse = List.of(new Denom("five", 5, true));
+		assertEquals(Map.of("five", 1L), CoinChange.plan(sparse, 7, 0, 0));
+		assertEquals(Map.of("five", 1L), CoinChange.plan(sparse, 7, -1, -1));
+		assertNull(CoinChange.plan(sparse, 7, 5, 0));
+		assertNull(CoinChange.breakInto(sparse, 7, 0));
+		assertNull(CoinChange.breakInto(List.of(), 5, 0));
+		assertTrue(CoinChange.plan(List.of(), 5, 0, 0).isEmpty());
+	}
 }

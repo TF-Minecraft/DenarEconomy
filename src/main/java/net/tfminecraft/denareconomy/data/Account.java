@@ -32,6 +32,18 @@ public class Account {
 		amount = amount.setScale(2, RoundingMode.HALF_UP);
 	}
 
+	/** Apply a change and restore the exact prior balance if its persistence action fails. */
+	public void change(double delta, Runnable persist) {
+		BigDecimal previous = amount;
+		change(delta);
+		try {
+			persist.run();
+		} catch (RuntimeException failure) {
+			amount = previous;
+			throw failure;
+		}
+	}
+
 	/** Whether a transfer amount is positive, finite and an exact number of cents. */
 	public static boolean isValidTransferAmount(BigDecimal value) {
 		return value != null && value.signum() > 0 && Double.isFinite(value.doubleValue())

@@ -203,7 +203,7 @@ public class MoneyManager implements Listener{
 	public double doTaxes(String p, double amount) {
 		PlayerEarnMoneyEvent event = new PlayerEarnMoneyEvent(p, amount);
 		Bukkit.getPluginManager().callEvent(event);
-		return Math.round(event.getAmount()*100.0)/100.0;
+		return Math.round(event.getTax()*100.0)/100.0;
 	}
 	
 	public void addMoney(Player p, double amount, boolean silent, boolean taxable) {
@@ -306,7 +306,9 @@ public class MoneyManager implements Listener{
 	    List<ItemStack> items = new ArrayList<>();
 	    for (Map.Entry<String, Long> entry : itemCounts.entrySet()) {
 	        String[] parts = entry.getKey().split("\\.");
-	        int count = (int) Math.min(entry.getValue(), Integer.MAX_VALUE);
+	        // Refuse an incomplete payout instead of truncating a requested coin count.
+	        if (entry.getValue() > Integer.MAX_VALUE) return new ArrayList<>();
+	        int count = entry.getValue().intValue();
 
 	        if (parts[0].equalsIgnoreCase("v")) {
 	            ItemStack item = new ItemStack(Material.valueOf(parts[1].toUpperCase()), count);
@@ -314,10 +316,11 @@ public class MoneyManager implements Listener{
 	        } else if (parts[0].equalsIgnoreCase("m")) {
 	            // MMOItems usually returns a new ItemStack each time, so we set the amount after fetching
 	            ItemStack item = MMOItems.plugin.getItem(parts[1].toUpperCase(), parts[2].toUpperCase());
-	            if (item != null) {
-	                item.setAmount(count);
-	                items.add(item);
-	            }
+	            if (item == null) return new ArrayList<>();
+	            item.setAmount(count);
+	            items.add(item);
+	        } else {
+	            return new ArrayList<>();
 	        }
 	    }
 
@@ -376,14 +379,16 @@ public class MoneyManager implements Listener{
 		return item;
 	}
 
-	@SuppressWarnings("unused")
 	public void dropItems(Player p, Location loc, double amount) {
+		dropItems(p, loc, amount, amountToItems(amount));
+	}
+
+	private void dropItems(Player p, Location loc, double amount, List<ItemStack> items) {
 		final Vector launchVector = new Vector(
 			(Math.random() - 0.5) * 0.2, // small horizontal motion (left/right)
 			0.2 + Math.random() * 0.1,   // slight upward motion
 			(Math.random() - 0.5) * 0.2  // small horizontal motion (forward/back)
 		);
-		List<ItemStack> items = amountToItems(amount);
 	    if (items.isEmpty()) return;
 
 	    boolean[] named = {false}; // Use array to allow modification in inner class
@@ -447,6 +452,10 @@ public class MoneyManager implements Listener{
 	}
 	
 	public void pay(Player p, double amount) {
+	    if (!Double.isFinite(amount) || !Account.isValidTransferAmount(BigDecimal.valueOf(amount))) {
+	        MessageLoader.send(p, "errors.invalid-amount");
+	        return;
+	    }
 	    PlayerData pd = pm.get(p);
 	    Account pouch = pd.getPouch();
 
@@ -455,8 +464,13 @@ public class MoneyManager implements Listener{
 	        return;
 	    }
 
+	    List<ItemStack> items = amountToItems(amount);
+	    if (items.isEmpty()) {
+	        MessageLoader.send(p, "errors.coins-unavailable");
+	        return;
+	    }
 	    pouch.change(-amount);
-	    dropItems(p, null, amount);
+	    dropItems(p, null, amount, items);
 	}
 
 	@EventHandler
@@ -505,8 +519,9 @@ public class MoneyManager implements Listener{
 		Bukkit.getPluginManager().callEvent(event);
 	}
 	
-	@EventHandler
+	@EventHandler(ignoreCancelled = true)
 	public void pickupCoin(EntityPickupItemEvent e) {
+		if (e.isCancelled()) return;
 		if(!(e.getEntity() instanceof Player)) return;
 		Player p = (Player) e.getEntity();
 		ItemStack item = e.getItem().getItemStack();
@@ -575,8 +590,11 @@ public class MoneyManager implements Listener{
 		double balance = pouch.getBal();
 		if (balance <= 0) return;
 
-		pouch.change(-balance); // Remove from pouch
-		dropItems(null, victim.getLocation(), balance); // Drop money at death location
+		List<ItemStack> items = amountToItems(balance);
+		if (items.isEmpty()) return;
+
+		pouch.change(-balance); // Remove only after preparing a usable payout
+		dropItems(null, victim.getLocation(), balance, items);
 	}
 	
 	// Keep the existing legacy text representation, formatting, and exact-string comparisons.
