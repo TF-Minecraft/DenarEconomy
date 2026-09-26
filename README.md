@@ -48,8 +48,10 @@ when a payment, conversion, or PvP death cannot produce coins, and honor cancell
 coin pickups. Conversions require exact change and drop inventory overflow.
 Taxable earnings retain their full value unless a listener explicitly sets tax.
 Account I/O errors propagate instead of creating zero balances or discarding unsaved
-sessions. Saves write a temporary sibling and require atomic replacement; failed
-offline changes restore the prior balance. Shutdown retries all retained accounts
+sessions. Saves flush a temporary sibling to disk before atomic replacement, then
+sync the directory; failed offline changes restore the prior balance. A directory
+sync failure after replacement logs a durability warning without undoing the
+committed transaction. Shutdown retries all retained accounts
 and continues after individual failures. Persistent storage failures still require
 operator attention before the server process exits; retained memory is not durable.
 

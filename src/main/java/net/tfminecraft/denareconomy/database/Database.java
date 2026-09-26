@@ -6,6 +6,11 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardOpenOption;
+import java.util.logging.Level;
 import java.nio.file.Path;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -34,7 +39,11 @@ public class Database {
             Files.createDirectories(dataDir.toPath());
             Path temporary = Files.createTempFile(dataDir.toPath(), data.getId() + "-", ".tmp");
             try {
-                Files.writeString(temporary, json);
+                try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.WRITE)) {
+                    ByteBuffer bytes = StandardCharsets.UTF_8.encode(json);
+                    while (bytes.hasRemaining()) channel.write(bytes);
+                    channel.force(true);
+                }
                 // Fail closed if atomic replacement is unavailable on this filesystem.
                 Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             } catch (IOException e) {
@@ -47,6 +56,13 @@ public class Database {
             }
         } catch (IOException e) {
             throw new UncheckedIOException("Could not save account " + data.getId(), e);
+        }
+        // Replacement has committed. A directory-sync failure must not roll back only memory.
+        try (FileChannel directory = FileChannel.open(dataDir.toPath(), StandardOpenOption.READ)) {
+            directory.force(true);
+        } catch (IOException e) {
+            Bukkit.getLogger().log(Level.WARNING, "Saved account " + data.getId()
+                    + " but could not sync its directory; power-loss durability is not guaranteed", e);
         }
     }
 

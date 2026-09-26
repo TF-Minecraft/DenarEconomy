@@ -9,10 +9,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -175,7 +178,7 @@ class DatabaseTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"write", "move", "cleanup"})
+  @ValueSource(strings = {"write", "force", "move", "cleanup"})
   void interruptedReplacementPreservesOriginalAccount(String phase) throws Exception {
     UUID id = UUID.randomUUID();
     Database.savePlayerData(account(id, 12.34, 100));
@@ -187,7 +190,31 @@ class DatabaseTest {
             ? new AtomicMoveNotSupportedException("temporary", "account", "test filesystem")
             : new IOException("disk full while writing");
     IOException cleanupFailure = new IOException("cleanup denied");
-    try (var files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+    try (var files = mockStatic(Files.class, CALLS_REAL_METHODS);
+        var channels = mockStatic(FileChannel.class, CALLS_REAL_METHODS)) {
+      channels
+          .when(() -> FileChannel.open(any(Path.class), eq(StandardOpenOption.WRITE)))
+          .thenAnswer(
+              invocation -> {
+                Path temporary = invocation.getArgument(0);
+                temporaryFiles.add(temporary);
+                FileChannel real = (FileChannel) invocation.callRealMethod();
+                FileChannel channel = spy(real);
+                if (phase.equals("force")) {
+                  doThrow(failure).when(channel).force(true);
+                } else if (!phase.equals("move")) {
+                  doAnswer(
+                          write -> {
+                            ByteBuffer bytes = write.getArgument(0);
+                            bytes.limit(Math.min(bytes.limit(), bytes.position() + 10));
+                            real.write(bytes);
+                            throw failure;
+                          })
+                      .when(channel)
+                      .write(any(ByteBuffer.class));
+                }
+                return channel;
+              });
       if (phase.equals("move")) {
         files
             .when(
@@ -198,17 +225,6 @@ class DatabaseTest {
                         eq(StandardCopyOption.ATOMIC_MOVE),
                         eq(StandardCopyOption.REPLACE_EXISTING)))
             .thenThrow(failure);
-      } else {
-        files
-            .when(() -> Files.writeString(any(Path.class), any(CharSequence.class)))
-            .thenAnswer(
-                invocation -> {
-                  Path temporary = invocation.getArgument(0);
-                  temporaryFiles.add(temporary);
-                  Files.write(
-                      temporary, "incomplete".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                  throw failure;
-                });
       }
       if (phase.equals("cleanup")) {
         files.when(() -> Files.deleteIfExists(any(Path.class))).thenThrow(cleanupFailure);
@@ -228,6 +244,27 @@ class DatabaseTest {
     }
     try (var paths = Files.list(DIRECTORY)) {
       assertEquals(List.of(file), paths.toList());
+    }
+  }
+
+  @Test
+  void directorySyncFailureWarnsWithoutReportingACommittedTransactionAsFailed() throws Exception {
+    UUID id = UUID.randomUUID();
+    Database.savePlayerData(account(id, 0, 100));
+    var logger = mock(java.util.logging.Logger.class);
+    IOException failure = new IOException("directory sync unavailable");
+    FileChannel directory = mock(FileChannel.class);
+    doThrow(failure).when(directory).force(true);
+    try (var channels = mockStatic(FileChannel.class, CALLS_REAL_METHODS);
+        var bukkit = mockStatic(Bukkit.class)) {
+      channels
+          .when(() -> FileChannel.open(DIRECTORY, StandardOpenOption.READ))
+          .thenReturn(directory);
+      bukkit.when(Bukkit::getLogger).thenReturn(logger);
+      assertDoesNotThrow(() -> Database.savePlayerData(account(id, 0, 200)));
+      assertEquals(200, Database.loadPlayerData(id).getBank().getBal());
+      verify(logger)
+          .log(eq(java.util.logging.Level.WARNING), contains(id.toString()), same(failure));
     }
   }
 
