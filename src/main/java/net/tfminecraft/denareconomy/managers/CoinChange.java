@@ -65,9 +65,7 @@ public final class CoinChange {
 		// A cap of 0 would read as "no cap", and the smallest possible coin has nothing below it.
 		if (coinCents <= 1 || coinCents <= minCents) return null;
 		// Strictly smaller, so a break always makes progress and can never loop.
-		Map<String, Long> counts = plan(sorted, coinCents, coinCents - 1, minCents);
-		if (counts == null || counts.isEmpty()) return null;
-		return counts;
+		return plan(sorted, coinCents, coinCents - 1, minCents);
 	}
 
 	/** Total value of a plan, for asserting that change adds up. */

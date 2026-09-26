@@ -8,7 +8,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import net.tfminecraft.denareconomy.accounts.OfflineModifier;
-import net.tfminecraft.denareconomy.database.Database;
 import net.tfminecraft.denareconomy.loaders.CoinLoader;
 import net.tfminecraft.denareconomy.loaders.DropLoader;
 import net.tfminecraft.denareconomy.loaders.MessageLoader;
@@ -49,9 +48,7 @@ public class DenarEconomy extends JavaPlugin {
 
 	@Override
 	public void onDisable(){
-		for(Player p : Bukkit.getOnlinePlayers()){
-			Database.savePlayerData(playerManager.get(p));
-		}
+		playerManager.saveAll();
 		for (ArmorStand stand : moneyManager.getStandMap().values()) {
 			if (stand != null && !stand.isDead()) stand.remove();
 		}

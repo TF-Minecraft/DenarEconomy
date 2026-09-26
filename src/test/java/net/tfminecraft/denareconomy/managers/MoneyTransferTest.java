@@ -74,6 +74,7 @@ class MoneyTransferTest {
         assertFalse(MoneyManager.transfer(from, to, new BigDecimal("1.01")));
         assertFalse(MoneyManager.transfer(from, to, (BigDecimal) null));
         assertFalse(MoneyManager.transfer(from, null, new BigDecimal("0.01")));
+        assertFalse(MoneyManager.transfer(null, to, new BigDecimal("0.01")));
         assertEquals(1.00, from.getBal());
         assertEquals(2.00, to.getBal());
     }

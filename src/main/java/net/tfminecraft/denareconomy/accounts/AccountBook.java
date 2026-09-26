@@ -1,5 +1,7 @@
 package net.tfminecraft.denareconomy.accounts;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.UUID;
 
 import net.tfminecraft.denareconomy.data.Account;
@@ -67,14 +69,15 @@ public final class AccountBook {
 		if (!allowNegative && delta < 0.0 && !covers(acc.getBal(), delta)) {
 			return false;
 		}
-		acc.change(delta);
 		if (session) {
+			acc.change(delta);
 			if (!loaded) {
 				store.keep(data);
 			}
 			return true;
 		}
-		store.save(data);
+		PlayerData pending = data;
+		acc.change(delta, () -> store.save(pending));
 		if (loaded) {
 			store.drop(id);
 		}
@@ -93,7 +96,7 @@ public final class AccountBook {
 	}
 
 	private static Account accountOf(PlayerData data, Accounts account) {
-		if (data == null || account == null) {
+		if (data == null) {
 			return null;
 		}
 		return switch (account) {
@@ -102,10 +105,9 @@ public final class AccountBook {
 		};
 	}
 
-	/** True when the balance, in cents, can absorb this negative change. */
+	/** Check the resulting balance using the same rounding as Account.change. */
 	static boolean covers(double balance, double delta) {
-		long have = Math.round(balance * 100.0);
-		long cents = Math.round(delta * 100.0);
-		return have + cents >= 0;
+		return BigDecimal.valueOf(balance).add(BigDecimal.valueOf(delta))
+				.setScale(2, RoundingMode.HALF_UP).signum() >= 0;
 	}
 }
