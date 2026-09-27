@@ -18,3 +18,6 @@ permissions:
   denareconomy.reload:
     description: Reload DenarEconomy configs
     default: op
+  denareconomy.give:
+    description: Credit a player's bank or pouch with /deco give
+    default: op
