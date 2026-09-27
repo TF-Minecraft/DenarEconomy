@@ -7,10 +7,14 @@ import static org.mockito.Mockito.*;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import net.tfminecraft.denareconomy.DenarEconomy;
+import net.tfminecraft.denareconomy.accounts.OfflineModifier;
 import net.tfminecraft.denareconomy.data.PlayerData;
 import net.tfminecraft.denareconomy.database.BalTopEntry;
 import net.tfminecraft.denareconomy.database.Database;
+import net.tfminecraft.denareconomy.enums.Accounts;
 import net.tfminecraft.denareconomy.event.PlayerBankPulseEvent;
 import net.tfminecraft.denareconomy.item.Coin;
 import net.tfminecraft.denareconomy.loaders.CoinLoader;
@@ -315,6 +319,161 @@ class CommandManagerTest {
     assertNull(commands.onTabComplete(player, command("pouch"), "pouch", new String[] {""}));
     assertEquals(
         List.of(), commands.onTabComplete(player, command("other"), "other", new String[] {""}));
+  }
+
+  @Test
+  void giveRejectsPlayersWithoutOperatorStatusOrPermission() {
+    try (MockedStatic<OfflineModifier> offline = mockStatic(OfflineModifier.class)) {
+      assertTrue(run("give", "Alex", "5"));
+      messages.verify(() -> MessageLoader.send(player, "errors.no-permission"));
+      offline.verifyNoInteractions();
+    }
+  }
+
+  @Test
+  void giveValidatesUsageAmountAccountAndPlayer() {
+    CommandSender console = mock(CommandSender.class);
+    try (MockedStatic<OfflineModifier> offline = mockStatic(OfflineModifier.class)) {
+      give(console);
+      give(console, "Alex");
+      give(console, "Alex", "5", "bank", "extra");
+      give(console, "Alex", "5", "wallet");
+      messages.verify(() -> MessageLoader.send(console, "errors.give-usage"), times(4));
+      give(console, "Alex", "0.005");
+      give(console, "Alex", "-1");
+      messages.verify(() -> MessageLoader.send(console, "errors.invalid-amount"), times(2));
+      give(console, "Nobody", "5");
+      messages.verify(
+          () -> MessageLoader.send(console, "errors.unknown-player", "player", "Nobody"));
+      offline.verify(() -> OfflineModifier.apply(any(UUID.class), any(), anyDouble()), never());
+    }
+  }
+
+  @Test
+  void giveCreditsTheBankByDefaultAndThePouchOnRequest() {
+    Logger logger = pluginLogger();
+    CommandSender console = mock(CommandSender.class);
+    when(console.getName()).thenReturn("CONSOLE");
+    UUID id = UUID.randomUUID();
+    try (MockedStatic<OfflineModifier> offline = mockStatic(OfflineModifier.class)) {
+      offline.when(() -> OfflineModifier.playerId("Alex")).thenReturn(id);
+      offline.when(() -> OfflineModifier.apply(eq(id), any(), anyDouble())).thenReturn(true);
+      give(console, "Alex", "12.5");
+      give(console, "Alex", "0.02", "POUCH");
+      give(console, "Alex", "3", "Bank");
+      offline.verify(() -> OfflineModifier.apply(id, Accounts.BANK, 12.5));
+      offline.verify(() -> OfflineModifier.apply(id, Accounts.POUCH, 0.02));
+      offline.verify(() -> OfflineModifier.apply(id, Accounts.BANK, 3.0));
+      messages.verify(
+          () ->
+              MessageLoader.send(
+                  console,
+                  "give.sent",
+                  "amount",
+                  new BigDecimal("12.50"),
+                  "player",
+                  "Alex",
+                  "account",
+                  "bank"));
+      messages.verify(
+          () ->
+              MessageLoader.send(
+                  console,
+                  "give.sent",
+                  "amount",
+                  new BigDecimal("0.02"),
+                  "player",
+                  "Alex",
+                  "account",
+                  "pouch"));
+      verify(logger).info("CONSOLE gave 12.50 to Alex (" + id + ") bank");
+      verify(logger).info("CONSOLE gave 0.02 to Alex (" + id + ") pouch");
+      // Alex is offline, so only the sender hears about it.
+      messages.verify(() -> MessageLoader.send(any(Player.class), eq("give.received"), any()), never());
+    }
+  }
+
+  @Test
+  void giveTellsAnOnlineRecipientAndAcceptsOperatorsAndPermissionHolders() {
+    pluginLogger();
+    UUID id = UUID.randomUUID();
+    Player target = mock(Player.class);
+    bukkit.when(() -> Bukkit.getPlayer(id)).thenReturn(target);
+    when(player.getName()).thenReturn("Admin");
+    try (MockedStatic<OfflineModifier> offline = mockStatic(OfflineModifier.class)) {
+      offline.when(() -> OfflineModifier.playerId("Sam")).thenReturn(id);
+      offline.when(() -> OfflineModifier.apply(eq(id), any(), anyDouble())).thenReturn(true);
+      when(player.isOp()).thenReturn(true);
+      assertTrue(run("give", "Sam", "4"));
+      when(player.isOp()).thenReturn(false);
+      when(player.hasPermission("denareconomy.give")).thenReturn(true);
+      assertTrue(run("GIVE", "Sam", "1.25", "pouch"));
+      offline.verify(() -> OfflineModifier.apply(id, Accounts.BANK, 4.0));
+      offline.verify(() -> OfflineModifier.apply(id, Accounts.POUCH, 1.25));
+      messages.verify(
+          () ->
+              MessageLoader.send(
+                  target, "give.received", "amount", new BigDecimal("4.00"), "account", "bank"));
+      messages.verify(
+          () ->
+              MessageLoader.send(
+                  target, "give.received", "amount", new BigDecimal("1.25"), "account", "pouch"));
+    }
+  }
+
+  @Test
+  void giveReportsRefusedAndFailedPaymentsWithoutClaimingSuccess() {
+    Logger logger = pluginLogger();
+    CommandSender console = mock(CommandSender.class);
+    UUID refused = UUID.randomUUID();
+    UUID broken = UUID.randomUUID();
+    IllegalStateException failure = new IllegalStateException("disk full");
+    try (MockedStatic<OfflineModifier> offline = mockStatic(OfflineModifier.class)) {
+      offline.when(() -> OfflineModifier.playerId("Alex")).thenReturn(refused);
+      offline.when(() -> OfflineModifier.playerId("Sam")).thenReturn(broken);
+      offline.when(() -> OfflineModifier.apply(eq(refused), any(), anyDouble())).thenReturn(false);
+      offline
+          .when(() -> OfflineModifier.apply(eq(broken), any(), anyDouble()))
+          .thenThrow(failure);
+      give(console, "Alex", "5");
+      give(console, "Sam", "5");
+      messages.verify(() -> MessageLoader.send(console, "errors.give-failed", "player", "Alex"));
+      messages.verify(() -> MessageLoader.send(console, "errors.give-failed", "player", "Sam"));
+      verify(logger)
+          .log(Level.SEVERE, "Could not give 5.00 to Sam (" + broken + ")", failure);
+      verify(logger, never()).info(anyString());
+      messages.verify(
+          () -> MessageLoader.send(eq(console), eq("give.sent"), any(Object[].class)), never());
+    }
+  }
+
+  @Test
+  void giveCompletionsNeedPermissionAndSuggestEachArgument() {
+    CommandSender console = mock(CommandSender.class);
+    assertTrue(
+        commands.onTabComplete(console, deco, "deco", new String[] {"g"}).contains("give"));
+    assertEquals(List.of(), tab("give", ""));
+    when(player.hasPermission("denareconomy.give")).thenReturn(true);
+    assertEquals(List.of("give"), tab("gi"));
+    assertEquals(List.of("<player>"), tab("give", ""));
+    assertEquals(List.of("<amount>"), tab("give", "Alex", ""));
+    assertEquals(List.of("bank", "pouch"), tab("give", "Alex", "5", ""));
+    assertEquals(List.of("pouch"), tab("Give", "Alex", "5", "P"));
+    assertEquals(List.of(), tab("give", "Alex", "5", "bank", ""));
+  }
+
+  private void give(CommandSender sender, String... args) {
+    String[] full = new String[args.length + 1];
+    full[0] = "give";
+    System.arraycopy(args, 0, full, 1, args.length);
+    assertTrue(commands.onCommand(sender, deco, "deco", full));
+  }
+
+  private Logger pluginLogger() {
+    DenarEconomy.plugin = mock(DenarEconomy.class);
+    Logger logger = mock(Logger.class);
+    when(DenarEconomy.plugin.getLogger()).thenReturn(logger);
+    return logger;
   }
 
   private boolean run(String... args) {

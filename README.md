@@ -13,6 +13,7 @@ The plugin also supplies the shared economy used by other TF-Minecraft systems, 
 - **Multiple denominations** — represent values with gold and silver coins, handfuls, stacks, and pouches of coins.
 - **Coins in the world** — drop money from your pouch as physical coins for others to collect.
 - **Balance visibility** — inspect personal balances and view a leaderboard of the wealthiest accounts.
+- **Admin credits** — console or operators can add denars to a player's bank or pouch with `/deco give <player> <amount> [bank|pouch]`, whether the player is online or offline (permission `denareconomy.give`, op by default).
 - **Shared earnings** — give other plugins a common way to award money and respond to income, banking, and material deposits.
 
 ## Documentation

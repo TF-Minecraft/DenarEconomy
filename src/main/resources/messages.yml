@@ -20,6 +20,9 @@ errors:
   unknown-coin: "%prefix%&cUnknown coin."
   invalid-count: "%prefix%&cAmount must be a whole number of coins."
   coins-unavailable: "%prefix%&cCannot create coins for this amount. Your pouch has not been charged."
+  give-usage: "%prefix%&cUsage: /deco give <player> <amount> [bank|pouch]"
+  unknown-player: "%prefix%&cNo denar account is known for %player%."
+  give-failed: "%prefix%&cCould not pay %player%. Their balance has not changed."
 
 balance:
   pouch: "#3ce8c9Current Pouch Balance: #b39122%amount%#dbaf1dd"
@@ -42,6 +45,10 @@ bank:
   footer: "&e====================================="
   deposited: "Deposited"
   withdrew: "Withdrew"
+
+give:
+  sent: "%prefix%&aGave #b39122%amount%#dbaf1dd &ato %player%'s %account%."
+  received: "#dbaf1d+#b39122%amount%#dbaf1dd #3ce8c9added to your %account%."
 
 money:
   earned: "#dbaf1d+#b39122%amount%#dbaf1dd"

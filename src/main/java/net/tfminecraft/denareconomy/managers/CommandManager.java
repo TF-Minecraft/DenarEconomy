@@ -3,6 +3,8 @@ package net.tfminecraft.denareconomy.managers;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 import org.bukkit.Bukkit;
@@ -16,10 +18,12 @@ import org.bukkit.inventory.ItemStack;
 
 import net.tfminecraft.tlibs.utils.ParseUtils;
 import net.tfminecraft.denareconomy.DenarEconomy;
+import net.tfminecraft.denareconomy.accounts.OfflineModifier;
 import net.tfminecraft.denareconomy.data.Account;
 import net.tfminecraft.denareconomy.data.PlayerData;
 import net.tfminecraft.denareconomy.database.BalTopEntry;
 import net.tfminecraft.denareconomy.database.Database;
+import net.tfminecraft.denareconomy.enums.Accounts;
 import net.tfminecraft.denareconomy.item.Coin;
 import net.tfminecraft.denareconomy.loaders.CoinLoader;
 import net.tfminecraft.denareconomy.loaders.MessageLoader;
@@ -37,6 +41,12 @@ public class CommandManager implements CommandExecutor, TabCompleter {
         if (cmd.getName().equalsIgnoreCase(cmd1) && args.length > 0
                 && args[0].equalsIgnoreCase("reload")) {
             handleReload(sender);
+            return true;
+        }
+
+        if (cmd.getName().equalsIgnoreCase(cmd1) && args.length > 0
+                && args[0].equalsIgnoreCase("give")) {
+            handleGive(sender, args);
             return true;
         }
 
@@ -96,11 +106,84 @@ public class CommandManager implements CommandExecutor, TabCompleter {
     }
 
     private static boolean canReload(CommandSender sender) {
+        return isAdmin(sender, "denareconomy.reload");
+    }
+
+    private static boolean canGive(CommandSender sender) {
+        return isAdmin(sender, "denareconomy.give");
+    }
+
+    /** Console always passes; a player needs operator status or the permission. */
+    private static boolean isAdmin(CommandSender sender, String permission) {
         if (!(sender instanceof Player)) {
             return true;
         }
         Player player = (Player) sender;
-        return player.isOp() || player.hasPermission("denareconomy.reload");
+        return player.isOp() || player.hasPermission(permission);
+    }
+
+    /**
+     * Credit an account from console or by an operator: /deco give <player> <amount> [bank|pouch].
+     * The bank is the default. Offline players are paid through their saved account.
+     */
+    private void handleGive(CommandSender sender, String[] args) {
+        if (!canGive(sender)) {
+            MessageLoader.send(sender, "errors.no-permission");
+            return;
+        }
+        if (args.length < 3 || args.length > 4) {
+            MessageLoader.send(sender, "errors.give-usage");
+            return;
+        }
+
+        BigDecimal amount = parseBankAmount(args[2]);
+        if (amount == null) {
+            MessageLoader.send(sender, "errors.invalid-amount");
+            return;
+        }
+
+        Accounts account = args.length == 4 ? parseAccount(args[3]) : Accounts.BANK;
+        if (account == null) {
+            MessageLoader.send(sender, "errors.give-usage");
+            return;
+        }
+
+        String name = args[1];
+        UUID id = OfflineModifier.playerId(name);
+        if (id == null) {
+            MessageLoader.send(sender, "errors.unknown-player", "player", name);
+            return;
+        }
+
+        String accountName = account.name().toLowerCase();
+        boolean paid;
+        try {
+            paid = OfflineModifier.apply(id, account, amount.doubleValue());
+        } catch (RuntimeException failure) {
+            DenarEconomy.plugin.getLogger().log(Level.SEVERE, "Could not give " + amount + " to " + name
+                    + " (" + id + ")", failure);
+            paid = false;
+        }
+        if (!paid) {
+            MessageLoader.send(sender, "errors.give-failed", "player", name);
+            return;
+        }
+
+        DenarEconomy.plugin.getLogger().info(sender.getName() + " gave " + amount + " to " + name
+                + " (" + id + ") " + accountName);
+        MessageLoader.send(sender, "give.sent", "amount", amount, "player", name, "account", accountName);
+        Player target = Bukkit.getPlayer(id);
+        if (target != null) {
+            MessageLoader.send(target, "give.received", "amount", amount, "account", accountName);
+        }
+    }
+
+    private static Accounts parseAccount(String token) {
+        return switch (token.toLowerCase()) {
+            case "bank" -> Accounts.BANK;
+            case "pouch" -> Accounts.POUCH;
+            default -> null;
+        };
     }
 
     private void handleBalTop(Player p) {
@@ -288,6 +371,15 @@ public class CommandManager implements CommandExecutor, TabCompleter {
         p.playSound(p, Sound.BLOCK_NOTE_BLOCK_CHIME, 1f, 1f);
     }
 
+    private static List<String> giveCompletions(int position) {
+        return switch (position) {
+            case 2 -> List.of("<player>");
+            case 3 -> List.of("<amount>");
+            case 4 -> List.of("bank", "pouch");
+            default -> List.of();
+        };
+    }
+
     private void sendError(Player p) {
         MessageLoader.send(p, "general.unknown-subcommand");
     }
@@ -303,8 +395,15 @@ public class CommandManager implements CommandExecutor, TabCompleter {
                 completions.add("deposit");
                 completions.add("withdraw");
                 completions.add("baltop");
+                if (canGive(sender)) {
+                    completions.add("give");
+                }
                 if (canReload(sender)) {
                     completions.add("reload");
+                }
+            } else if (args.length > 1 && args[0].equalsIgnoreCase("give")) {
+                if (canGive(sender)) {
+                    completions.addAll(giveCompletions(args.length));
                 }
             } else if (args.length == 2) {
                 if (args[0].equalsIgnoreCase("pay") || args[0].equalsIgnoreCase("toitem") ||
