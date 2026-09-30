@@ -606,10 +606,12 @@ public class MoneyManager implements Listener{
 
 	/**
 	 * Paper only fires EntityPickupItemEvent when the inventory has room, but coins go to the
-	 * pouch. When nothing fits, collect them here instead.
+	 * pouch. When nothing fits, collect them here instead. Paper does not apply the player's
+	 * pickup setting to this event, so check it here.
 	 */
 	@EventHandler(ignoreCancelled = true)
 	public void pickupCoinWithFullInventory(PlayerAttemptPickupItemEvent e) {
+		if(!e.getPlayer().getCanPickupItems()) return;
 		ItemStack item = e.getItem().getItemStack();
 		if(e.getRemaining() < item.getAmount()) return;
 		Coin c = getCoin(item);

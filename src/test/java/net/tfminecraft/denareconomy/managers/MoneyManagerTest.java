@@ -504,6 +504,7 @@ class MoneyManagerTest {
     Item item = mock(Item.class);
     when(item.getItemStack()).thenReturn(stack);
     Coin coin = coin("v.gold_nugget", .1, false);
+    when(player.getCanPickupItems()).thenReturn(true);
     doReturn(null).when(money).getCoin(any());
     PlayerAttemptPickupItemEvent event = new PlayerAttemptPickupItemEvent(player, item, 3);
     money.pickupCoinWithFullInventory(event);
@@ -518,6 +519,11 @@ class MoneyManagerTest {
     assertFalse(event.isCancelled());
     verify(item, never()).remove();
     event = new PlayerAttemptPickupItemEvent(player, item, 3);
+    when(player.getCanPickupItems()).thenReturn(false);
+    money.pickupCoinWithFullInventory(event);
+    assertFalse(event.isCancelled());
+    verify(item, never()).remove();
+    when(player.getCanPickupItems()).thenReturn(true);
     money.pickupCoinWithFullInventory(event);
     assertTrue(event.isCancelled());
     verify(item).remove();
