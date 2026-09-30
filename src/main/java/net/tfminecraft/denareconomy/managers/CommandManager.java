@@ -78,6 +78,9 @@ public class CommandManager implements CommandExecutor, TabCompleter {
                 case "toitem":
                     handleToItem(p, args);
                     break;
+                case "topouch":
+                    DenarEconomy.getMoneyManager().toPouch(p);
+                    break;
                 case "deposit":
                     handleDeposit(p, args);
                     break;
@@ -392,6 +395,7 @@ public class CommandManager implements CommandExecutor, TabCompleter {
                 completions.add("bal");
                 completions.add("pay");
                 completions.add("toitem");
+                completions.add("topouch");
                 completions.add("deposit");
                 completions.add("withdraw");
                 completions.add("baltop");

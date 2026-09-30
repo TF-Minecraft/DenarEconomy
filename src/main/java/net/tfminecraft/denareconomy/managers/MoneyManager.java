@@ -28,6 +28,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.EntitySpawnEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.world.ChunkUnloadEvent;
@@ -411,6 +412,13 @@ public class MoneyManager implements Listener{
 	                
 
 	                NamespacedKey valueKey = new NamespacedKey(DenarEconomy.plugin, "customValue");
+	                // World and death drops are income. A hopper can move them into an inventory,
+	                // so they must not be redeemed with /deco topouch.
+	                if (p == null) {
+	                    m.getPersistentDataContainer().set(
+	                            new NamespacedKey(DenarEconomy.plugin, "worldPayout"),
+	                            PersistentDataType.BYTE, (byte) 1);
+	                }
 
 	                if (!named[0]) {
 	                    named[0] = true;
@@ -519,6 +527,69 @@ public class MoneyManager implements Listener{
 		Bukkit.getPluginManager().callEvent(event);
 	}
 	
+	/**
+	 * Put the coin stack in the main hand into the pouch. Coins you already hold are not income,
+	 * so this is not taxed.
+	 */
+	public void toPouch(Player p) {
+		ItemStack held = p.getInventory().getItemInMainHand();
+		if (held == null || held.getType() == Material.AIR) {
+			MessageLoader.send(p, "errors.no-coin-in-hand");
+			return;
+		}
+		Coin coin = getCoin(held);
+		if (coin == null || !coin.canWithdraw()) {
+			MessageLoader.send(p, "errors.no-coin-in-hand");
+			return;
+		}
+		if (isWorldPayout(held)) {
+			MessageLoader.send(p, "errors.world-payout");
+			return;
+		}
+		double amount = stackValue(coin, held);
+		if (amount <= 0) {
+			MessageLoader.send(p, "errors.no-coin-in-hand");
+			return;
+		}
+		p.getInventory().setItemInMainHand(null);
+		addMoney(p, amount, false, false);
+		p.playSound(p, Sound.BLOCK_NOTE_BLOCK_CHIME, 1f, 1f);
+	}
+
+	private boolean isWorldPayout(ItemStack stack) {
+		Byte mark = stack.getItemMeta().getPersistentDataContainer().get(
+				new NamespacedKey(DenarEconomy.plugin, "worldPayout"), PersistentDataType.BYTE);
+		return mark != null;
+	}
+
+	/** Value written on a payout stack, otherwise the coin's face value times the stack size. */
+	private double stackValue(Coin coin, ItemStack stack) {
+		Double custom = stack.getItemMeta().getPersistentDataContainer()
+				.get(new NamespacedKey(DenarEconomy.plugin, "customValue"), PersistentDataType.DOUBLE);
+		if (custom != null) return custom;
+		return combinedValue(coin, stack);
+	}
+
+	/**
+	 * Coins a player drops from their inventory are still theirs. Mark the dropper so picking
+	 * the same coins back up is not taxed. Someone else who picks them up still is. World payouts
+	 * stay unmarked so a hopper cannot turn them into untaxed income.
+	 */
+	@EventHandler(ignoreCancelled = true)
+	public void onPlayerDropCoin(PlayerDropItemEvent event) {
+		Item dropped = event.getItemDrop();
+		ItemStack stack = dropped.getItemStack();
+		Coin coin = getCoin(stack);
+		if (coin == null || !coin.canWithdraw() || isWorldPayout(stack)) return;
+		ItemMeta meta = stack.getItemMeta();
+		meta.getPersistentDataContainer().set(
+				new NamespacedKey(DenarEconomy.plugin, "sender"),
+				PersistentDataType.STRING,
+				event.getPlayer().getUniqueId().toString());
+		stack.setItemMeta(meta);
+		dropped.setItemStack(stack);
+	}
+
 	@EventHandler(ignoreCancelled = true)
 	public void pickupCoin(EntityPickupItemEvent e) {
 		if (e.isCancelled()) return;
