@@ -498,6 +498,44 @@ class MoneyManagerTest {
   }
 
   @Test
+  void fullInventoryStillCollectsCoinsIntoThePouch() throws Exception {
+    doNothing().when(money).addMoney(any(), anyDouble(), anyBoolean(), anyBoolean());
+    ItemStack stack = new ItemStack(Material.GOLD_NUGGET, 3);
+    Item item = mock(Item.class);
+    when(item.getItemStack()).thenReturn(stack);
+    Coin coin = coin("v.gold_nugget", .1, false);
+    when(player.getCanPickupItems()).thenReturn(true);
+    doReturn(null).when(money).getCoin(any());
+    PlayerAttemptPickupItemEvent event = new PlayerAttemptPickupItemEvent(player, item, 3);
+    money.pickupCoinWithFullInventory(event);
+    assertFalse(event.isCancelled());
+    doReturn(coin).when(money).getCoin(any());
+    money.pickupCoinWithFullInventory(event);
+    assertFalse(event.isCancelled());
+    when(coin.canWithdraw()).thenReturn(true);
+    // Room for some of the stack: EntityPickupItemEvent follows and takes the coins.
+    event = new PlayerAttemptPickupItemEvent(player, item, 2);
+    money.pickupCoinWithFullInventory(event);
+    assertFalse(event.isCancelled());
+    verify(item, never()).remove();
+    event = new PlayerAttemptPickupItemEvent(player, item, 3);
+    when(player.getCanPickupItems()).thenReturn(false);
+    money.pickupCoinWithFullInventory(event);
+    assertFalse(event.isCancelled());
+    verify(item, never()).remove();
+    when(player.getCanPickupItems()).thenReturn(true);
+    money.pickupCoinWithFullInventory(event);
+    assertTrue(event.isCancelled());
+    verify(item).remove();
+    verify(money).addMoney(player, .3, false, true);
+    assertTrue(
+        MoneyManager.class
+            .getMethod("pickupCoinWithFullInventory", PlayerAttemptPickupItemEvent.class)
+            .getAnnotation(org.bukkit.event.EventHandler.class)
+            .ignoreCancelled());
+  }
+
+  @Test
   void pickupHonorsCoinTypeChainsCustomValueAndSender() {
     doNothing().when(money).addMoney(any(), anyDouble(), anyBoolean(), anyBoolean());
     ItemStack stack = new ItemStack(Material.GOLD_NUGGET, 3);
