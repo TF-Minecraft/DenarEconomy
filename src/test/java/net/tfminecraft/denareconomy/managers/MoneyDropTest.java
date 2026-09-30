@@ -212,6 +212,7 @@ class MoneyDropTest {
       assertEquals(
           player.getUniqueId().toString(),
           metadata(spawned.get(index), "sender", PersistentDataType.STRING));
+      assertNull(metadata(spawned.get(index), "worldPayout", PersistentDataType.BYTE));
       if (index > 0) {
         assertEquals(0.0, metadata(spawned.get(index), "customValue", PersistentDataType.DOUBLE));
         assertEquals(1, metadata(spawned.get(index), "silent", PersistentDataType.INTEGER));
@@ -241,6 +242,8 @@ class MoneyDropTest {
     assertTrue(vector.getZ() >= -0.1 && vector.getZ() < 0.1);
     verify(entities.get(1)).setVelocity(vector);
     assertNull(metadata(spawned.getFirst(), "sender", PersistentDataType.STRING));
+    assertEquals((byte) 1, metadata(spawned.getFirst(), "worldPayout", PersistentDataType.BYTE));
+    assertEquals((byte) 1, metadata(spawned.get(1), "worldPayout", PersistentDataType.BYTE));
     assertEquals(2.0, metadata(spawned.getFirst(), "customValue", PersistentDataType.DOUBLE));
     assertEquals(10, location.getY(), "Dropping must not mutate the caller's location");
   }

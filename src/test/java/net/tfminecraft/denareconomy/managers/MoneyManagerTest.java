@@ -577,6 +577,14 @@ class MoneyManagerTest {
 
     Coin gold = coin("v.gold_nugget", .1, true);
     doReturn(gold).when(money).getCoin(stack);
+    ItemMeta worldPayout = stack.getItemMeta();
+    worldPayout.getPersistentDataContainer().set(key("worldPayout"), PersistentDataType.BYTE, (byte) 1);
+    stack.setItemMeta(worldPayout);
+    money.toPouch(player);
+    messages.verify(() -> MessageLoader.send(player, "errors.world-payout"));
+    assertEquals(0, data.getPouch().getBal());
+    worldPayout.getPersistentDataContainer().remove(key("worldPayout"));
+    stack.setItemMeta(worldPayout);
     ItemMeta emptyValue = stack.getItemMeta();
     emptyValue.getPersistentDataContainer().set(key("customValue"), PersistentDataType.DOUBLE, 0.);
     stack.setItemMeta(emptyValue);
@@ -618,6 +626,13 @@ class MoneyManagerTest {
     money.onPlayerDropCoin(new PlayerDropItemEvent(player, dropped));
     verify(dropped, never()).setItemStack(any());
     when(coin.canWithdraw()).thenReturn(true);
+    ItemMeta worldPayout = stack.getItemMeta();
+    worldPayout.getPersistentDataContainer().set(key("worldPayout"), PersistentDataType.BYTE, (byte) 1);
+    stack.setItemMeta(worldPayout);
+    money.onPlayerDropCoin(new PlayerDropItemEvent(player, dropped));
+    verify(dropped, never()).setItemStack(any());
+    worldPayout.getPersistentDataContainer().remove(key("worldPayout"));
+    stack.setItemMeta(worldPayout);
     money.onPlayerDropCoin(new PlayerDropItemEvent(player, dropped));
     verify(dropped).setItemStack(stack);
     assertEquals(

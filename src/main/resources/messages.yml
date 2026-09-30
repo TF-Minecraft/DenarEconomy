@@ -14,6 +14,7 @@ errors:
   invalid-amount: "%prefix%&cInvalid amount"
   not-enough-pouch: "#a33d1dNot enough funds in pouch"
   no-coin-in-hand: "%prefix%&cHold coins to put them in your pouch."
+  world-payout: "%prefix%&cDrop that coin and pick it up."
   not-enough-bank: "#a33d1dNot enough funds in bank"
   pouch-cooldown: "%prefix%&cWait %seconds%s before using that again."
   item-chain-broken: "Error: First money item not initialized."
