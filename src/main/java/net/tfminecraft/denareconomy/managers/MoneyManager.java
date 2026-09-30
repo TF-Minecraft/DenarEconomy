@@ -28,6 +28,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.EntitySpawnEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerAttemptPickupItemEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -600,7 +601,27 @@ public class MoneyManager implements Listener{
 		if(c == null) return;
 		if(!c.canWithdraw()) return;
 		e.setCancelled(true);
-		e.getItem().remove();
+		collectCoin(p, e.getItem(), c);
+	}
+
+	/**
+	 * Paper only fires EntityPickupItemEvent when the inventory has room, but coins go to the
+	 * pouch. When nothing fits, collect them here instead.
+	 */
+	@EventHandler(ignoreCancelled = true)
+	public void pickupCoinWithFullInventory(PlayerAttemptPickupItemEvent e) {
+		ItemStack item = e.getItem().getItemStack();
+		if(e.getRemaining() < item.getAmount()) return;
+		Coin c = getCoin(item);
+		if(c == null) return;
+		if(!c.canWithdraw()) return;
+		e.setCancelled(true);
+		collectCoin(e.getPlayer(), e.getItem(), c);
+	}
+
+	private void collectCoin(Player p, Item entity, Coin c) {
+		ItemStack item = entity.getItemStack();
+		entity.remove();
 		ItemMeta m = item.getItemMeta();
 		
 		NamespacedKey chain = new NamespacedKey(DenarEconomy.plugin, "chained");
