@@ -296,7 +296,7 @@ class CommandManagerTest {
 
   @Test
   void completionsFilterCaseInsensitivelyAndRespectReloadPermission() {
-    assertEquals(List.of("bal", "pay", "toitem", "deposit", "withdraw", "baltop"), tab(""));
+    assertEquals(List.of("bal", "pay", "toitem", "topouch", "deposit", "withdraw", "baltop"), tab(""));
     assertEquals(List.of("bal", "baltop"), tab("BA"));
     assertEquals(List.of(), tab("re"));
     when(player.hasPermission("denareconomy.reload")).thenReturn(true);
@@ -316,9 +316,17 @@ class CommandManagerTest {
     Coin blocked = coin("blocked", 1, false);
     coins.when(CoinLoader::get).thenReturn(List.of(gold, blocked));
     assertEquals(List.of("gold"), tab("toitem", "1", "G"));
+    assertEquals(List.of(), tab("topouch", ""));
     assertNull(commands.onTabComplete(player, command("pouch"), "pouch", new String[] {""}));
     assertEquals(
         List.of(), commands.onTabComplete(player, command("other"), "other", new String[] {""}));
+  }
+
+  @Test
+  void topouchSendsHeldCoinsToThePouch() {
+    assertTrue(run("topouch"));
+    assertTrue(run("ToPouch"));
+    verify(money, times(2)).toPouch(player);
   }
 
   @Test

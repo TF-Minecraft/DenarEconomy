@@ -558,6 +558,113 @@ class MoneyManagerTest {
   }
 
   @Test
+  void heldCoinsMoveIntoThePouchWithoutTax() {
+    PlayerInventory inventory = mock(PlayerInventory.class);
+    when(player.getInventory()).thenReturn(inventory);
+    when(inventory.getItemInMainHand()).thenReturn(null);
+    money.toPouch(player);
+    when(inventory.getItemInMainHand()).thenReturn(new ItemStack(Material.AIR));
+    money.toPouch(player);
+    ItemStack stack = new ItemStack(Material.GOLD_NUGGET, 3);
+    when(inventory.getItemInMainHand()).thenReturn(stack);
+    doReturn(null).when(money).getCoin(stack);
+    money.toPouch(player);
+    Coin blocked = coin("v.gold_nugget", .1, false);
+    doReturn(blocked).when(money).getCoin(stack);
+    money.toPouch(player);
+    messages.verify(() -> MessageLoader.send(player, "errors.no-coin-in-hand"), times(4));
+    verify(inventory, never()).setItemInMainHand(any());
+
+    Coin gold = coin("v.gold_nugget", .1, true);
+    doReturn(gold).when(money).getCoin(stack);
+    ItemMeta emptyValue = stack.getItemMeta();
+    emptyValue.getPersistentDataContainer().set(key("customValue"), PersistentDataType.DOUBLE, 0.);
+    stack.setItemMeta(emptyValue);
+    money.toPouch(player);
+    messages.verify(() -> MessageLoader.send(player, "errors.no-coin-in-hand"), times(5));
+    assertEquals(0, data.getPouch().getBal());
+
+    ItemMeta priced = stack.getItemMeta();
+    priced.getPersistentDataContainer().set(key("customValue"), PersistentDataType.DOUBLE, 4.5);
+    stack.setItemMeta(priced);
+    taxEverything();
+    try (var bukkit = mockStatic(Bukkit.class, CALLS_REAL_METHODS)) {
+      bukkit.when(() -> Bukkit.getPlayer(id)).thenReturn(player);
+      money.toPouch(player);
+      assertEquals(4.5, data.getPouch().getBal());
+      verify(inventory).setItemInMainHand(null);
+      verify(player).playSound(player, Sound.BLOCK_NOTE_BLOCK_CHIME, 1f, 1f);
+      messages.verify(() -> MessageLoader.send(player, "money.earned", "amount", 4.5));
+
+      ItemStack face = new ItemStack(Material.GOLD_NUGGET, 3);
+      when(inventory.getItemInMainHand()).thenReturn(face);
+      doReturn(gold).when(money).getCoin(face);
+      money.toPouch(player);
+      assertEquals(4.8, data.getPouch().getBal());
+    }
+  }
+
+  @Test
+  void droppedCoinsAreUntaxedForTheDropperAndTaxedForAnyoneElse() {
+    ItemStack stack = new ItemStack(Material.GOLD_NUGGET, 2);
+    Item dropped = mock(Item.class);
+    when(dropped.getItemStack()).thenReturn(stack);
+    Coin coin = coin("v.gold_nugget", .5, true);
+    doReturn(null).when(money).getCoin(stack);
+    money.onPlayerDropCoin(new PlayerDropItemEvent(player, dropped));
+    verify(dropped, never()).setItemStack(any());
+    when(coin.canWithdraw()).thenReturn(false);
+    doReturn(coin).when(money).getCoin(stack);
+    money.onPlayerDropCoin(new PlayerDropItemEvent(player, dropped));
+    verify(dropped, never()).setItemStack(any());
+    when(coin.canWithdraw()).thenReturn(true);
+    money.onPlayerDropCoin(new PlayerDropItemEvent(player, dropped));
+    verify(dropped).setItemStack(stack);
+    assertEquals(
+        id.toString(),
+        stack.getItemMeta().getPersistentDataContainer().get(key("sender"), PersistentDataType.STRING));
+
+    taxEverything();
+    Player other = mock(Player.class);
+    UUID otherId = UUID.randomUUID();
+    when(other.getUniqueId()).thenReturn(otherId);
+    when(other.getName()).thenReturn("Sam");
+    when(other.isOnline()).thenReturn(true);
+    PlayerData otherData = new PlayerData(otherId);
+    DenarEconomy.getPlayerManager().keep(otherData);
+    try (var bukkit = mockStatic(Bukkit.class, CALLS_REAL_METHODS)) {
+      bukkit.when(() -> Bukkit.getPlayer(id)).thenReturn(player);
+      bukkit.when(() -> Bukkit.getPlayer(otherId)).thenReturn(other);
+      money.pickupCoin(new EntityPickupItemEvent(player, dropped, 0));
+      assertEquals(1, data.getPouch().getBal());
+      ItemStack again = new ItemStack(Material.GOLD_NUGGET, 2);
+      ItemMeta meta = again.getItemMeta();
+      meta.getPersistentDataContainer()
+          .set(key("sender"), PersistentDataType.STRING, id.toString());
+      again.setItemMeta(meta);
+      when(dropped.getItemStack()).thenReturn(again);
+      doReturn(coin).when(money).getCoin(again);
+      money.pickupCoin(new EntityPickupItemEvent(other, dropped, 0));
+      assertEquals(0, otherData.getPouch().getBal());
+    } finally {
+      DenarEconomy.getPlayerManager().drop(otherId);
+    }
+  }
+
+  private void taxEverything() {
+    Bukkit.getPluginManager()
+        .registerEvent(
+            PlayerEarnMoneyEvent.class,
+            mock(org.bukkit.event.Listener.class),
+            org.bukkit.event.EventPriority.NORMAL,
+            (listener, event) -> {
+              PlayerEarnMoneyEvent earned = (PlayerEarnMoneyEvent) event;
+              earned.setAmount(earned.getAmount());
+            },
+            MockBukkit.createMockPlugin());
+  }
+
+  @Test
   void spawnedCoinsHaveNamesPickupDelayAndUniqueStackMarker() {
     money.coinSpawn(new EntitySpawnEvent(mock(Zombie.class)));
     Item item = mock(Item.class);
