@@ -12,10 +12,10 @@ general:
 errors:
   no-amount: "%prefix%&cNo amount specified"
   invalid-amount: "%prefix%&cInvalid amount"
-  not-enough-pouch: "#a33d1dYour pouch does not hold that much."
+  not-enough-pouch: "%prefix%#a33d1dYour pouch does not hold that much."
   no-coin-in-hand: "%prefix%&cHold coins to put them in your pouch."
   world-payout: "%prefix%&cDrop that coin and pick it up."
-  not-enough-bank: "#a33d1dThe banker finds too little in your account."
+  not-enough-bank: "%prefix%#a33d1dThe banker finds too little in your account."
   pouch-cooldown: "%prefix%&cWait %seconds%s before using that again."
   item-chain-broken: "Error: First money item not initialized."
   no-permission: "%prefix%&cYou do not have permission to do that."
