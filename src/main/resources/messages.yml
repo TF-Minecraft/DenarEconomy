@@ -1,8 +1,8 @@
 # All player-facing text.
 # Colours: & codes (&a, &e, &6) and #rrggbb hex both work.
-# %prefix% expands to the prefix below; the other %placeholders% are filled in by the plugin.
+# %prefix% expands to the prefix below (empty by default); the other %placeholders% are filled in by the plugin.
 
-prefix: "&a[DenarEconomy] "
+prefix: ""
 
 general:
   players-only: "Only players can use this command."
@@ -12,16 +12,16 @@ general:
 errors:
   no-amount: "%prefix%&cNo amount specified"
   invalid-amount: "%prefix%&cInvalid amount"
-  not-enough-pouch: "#a33d1dNot enough funds in pouch"
+  not-enough-pouch: "%prefix%#a33d1dYour pouch does not hold that much."
   no-coin-in-hand: "%prefix%&cHold coins to put them in your pouch."
   world-payout: "%prefix%&cDrop that coin and pick it up."
-  not-enough-bank: "#a33d1dNot enough funds in bank"
+  not-enough-bank: "%prefix%#a33d1dThe banker finds too little in your account."
   pouch-cooldown: "%prefix%&cWait %seconds%s before using that again."
   item-chain-broken: "Error: First money item not initialized."
   no-permission: "%prefix%&cYou do not have permission to do that."
   unknown-coin: "%prefix%&cUnknown coin."
   invalid-count: "%prefix%&cAmount must be a whole number of coins."
-  coins-unavailable: "%prefix%&cCannot create coins for this amount. Your pouch has not been charged."
+  coins-unavailable: "%prefix%&cThat sum cannot be counted out in coin. Your pouch has not been charged."
   give-usage: "%prefix%&cUsage: /deco give <player> <amount> [bank|pouch]"
   unknown-player: "%prefix%&cNo denar account is known for %player%."
   give-failed: "%prefix%&cCould not pay %player%. Their balance has not changed."
