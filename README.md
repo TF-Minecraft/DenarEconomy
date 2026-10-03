@@ -34,7 +34,7 @@ mvn -B --no-transfer-progress clean verify
 Tests use JUnit, MockBukkit, Mockito and real temporary files. JaCoCo reports all
 production classes, without coverage exclusions, to `target/site/jacoco/`
 (`index.html`, `jacoco.xml` and `jacoco.csv`); CI uploads that directory as a
-`coverage-report` artifact. `verify` enforces 100% line, branch and instruction
+`coverage-report-<run id>-<attempt>` artifact. `verify` enforces 100% line, branch and instruction
 coverage. Run Maven invocations sequentially within a checkout because they share
 the build directory.
 
