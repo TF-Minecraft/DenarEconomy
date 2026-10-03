@@ -13,7 +13,7 @@ The plugin also supplies the shared economy used by other TF-Minecraft systems, 
 - **Multiple denominations** — represent values with gold and silver coins, handfuls, stacks, and pouches of coins.
 - **Coins in the world** — drop money from your pouch as physical coins for others to collect.
 - **Balance visibility** — inspect personal balances and view a leaderboard of the wealthiest accounts.
-- **Admin credits** — console or operators can add denars to a player's bank or pouch with `/deco give <player> <amount> [bank|pouch]`, whether the player is online or offline (permission `denareconomy.give`, op by default).
+- **Admin credits** — staff can credit a player's bank or pouch balance, whether the player is online or offline.
 - **Shared earnings** — give other plugins a common way to award money and respond to income, banking, and material deposits.
 
 ## Documentation
@@ -31,34 +31,16 @@ With Java 21 and the pinned dependencies installed (the same preparation used in
 mvn -B --no-transfer-progress clean verify
 ```
 
-JaCoCo reports all production classes, without coverage exclusions. Open
-`target/site/jacoco/index.html` for the HTML report; `jacoco.xml` and `jacoco.csv`
-are in the same directory. CI uploads the report as a `coverage-report` artifact.
-Tests use MockBukkit, Mockito, and real temporary files; legacy relative database
-paths are isolated under `target/test-runtime`. Run Maven invocations sequentially
-within a checkout because they share the build directory.
+Tests use JUnit, MockBukkit, Mockito and real temporary files. JaCoCo reports all
+production classes, without coverage exclusions, to `target/site/jacoco/`
+(`index.html`, `jacoco.xml` and `jacoco.csv`); CI uploads that directory as a
+`coverage-report-<run id>-<attempt>` artifact. `verify` enforces 100% line, branch and instruction
+coverage. Run Maven invocations sequentially within a checkout because they share
+the build directory.
 
-The suite reaches **100% line, branch, and instruction coverage** across all
-30 production classes. `verify` enforces 100% for each of these metrics.
-Redundant private checks and unreachable enum defaults have been simplified;
-public APIs and money-drop recovery checks remain. Fault-injection tests cover
-the recovery paths even when an adapter violates Bukkit's non-null contracts.
-Regression tests prevent fractional-cent withdrawals from creating forbidden
-overdrafts, reject fractional-cent payments/conversions, preserve pouch balances
-when a payment, conversion, or PvP death cannot produce coins, and honor cancelled
-coin pickups. Conversions require exact change and drop inventory overflow.
-Taxable earnings retain their full value unless a listener explicitly sets tax.
-Account I/O errors propagate instead of creating zero balances or discarding unsaved
-sessions. Saves flush a temporary sibling to disk before atomic replacement, then
-sync the directory; failed offline changes restore the prior balance. A directory
-sync failure after replacement logs a durability warning without undoing the
-committed transaction. Shutdown retries all retained accounts
-and continues after individual failures. Persistent storage failures still require
-operator attention before the server process exits; retained memory is not durable.
-
-These tests validate plugin logic and simulated Bukkit interactions, not a live
-Paper server or the internals of MMOItems/TLibs. The filesystem permission cases
-require POSIX permissions and an unprivileged user, as provided by CI.
+The filesystem permission cases require POSIX permissions and an unprivileged
+user, as provided by CI. These tests validate plugin logic and simulated Bukkit
+interactions, not a live Paper server or the internals of MMOItems/TLibs.
 
 ## License
 
