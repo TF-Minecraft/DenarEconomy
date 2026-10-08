@@ -31,7 +31,8 @@ With Java 21 and the pinned dependencies installed (the same preparation used in
 mvn -B --no-transfer-progress clean verify
 ```
 
-Tests use JUnit, MockBukkit, Mockito and real temporary files. JaCoCo reports all
+Tests use JUnit, MockBukkit, Mockito and real temporary files. Surefire writes
+test reports to `target/surefire-reports/`. JaCoCo reports all
 production classes, without coverage exclusions, to `target/site/jacoco/`
 (`index.html`, `jacoco.xml` and `jacoco.csv`); CI uploads that directory as a
 `coverage-report-<run id>-<attempt>` artifact. `verify` enforces 100% line, branch and instruction
