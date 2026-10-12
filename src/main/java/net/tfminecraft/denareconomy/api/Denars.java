@@ -43,6 +43,14 @@ public final class Denars {
 		return DenarEconomy.getLedger().isOpen() && Characters.available();
 	}
 
+	/** Taxable payments wait while an installed faction provider starts or is unavailable. */
+	public static boolean taxReady() {
+		Ledger.requireMainThread();
+		org.bukkit.plugin.Plugin factions = Bukkit.getPluginManager().getPlugin("SimpleFactions");
+		return ready() && (factions == null || (factions.isEnabled()
+				&& Bukkit.getServicesManager().load(TaxPolicy.class) != null));
+	}
+
 	/** The character the player is playing now, or empty when none is active. */
 	public static Optional<CharacterRef> active(Player player) {
 		Ledger.requireMainThread();
@@ -117,6 +125,7 @@ public final class Denars {
 	private static Result pay(String opId, String reason, String from, CharacterRef earner, String to, long cents,
 			boolean taxable) {
 		requirePositive(cents);
+		if (taxable && !taxReady()) return Result.UNAVAILABLE;
 		List<Leg> legs = new ArrayList<>(List.of(new Leg(from, -cents)));
 		Optional<TaxLeg> tax = taxable ? taxLeg(earner, cents) : Optional.empty();
 		long taxCents = tax.map(TaxLeg::cents).orElse(0L);

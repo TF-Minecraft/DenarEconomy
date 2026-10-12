@@ -230,6 +230,7 @@ class DenarsTest {
     List<Runnable> calls =
         List.of(
             Denars::ready,
+            Denars::taxReady,
             () -> Denars.active(player),
             () -> Denars.balance(pouch),
             () -> Denars.post("p", "r", List.of(new Leg(Denars.MINT, -1), new Leg(pouch, 1))),
@@ -257,5 +258,25 @@ class DenarsTest {
     assertTrue(asked.isEmpty());
     assertEquals(Optional.empty(), Denars.status("e"));
     assertEquals("guild:" + character.ownerId(), Denars.guild(character.ownerId()));
+  }
+
+  @Test
+  void taxablePaymentsWaitForTheInstalledFactionPolicyWithoutRecordingRefusal() {
+    var factions = MockBukkit.createMockPlugin("SimpleFactions");
+    assertFalse(Denars.taxReady());
+    assertEquals(Result.UNAVAILABLE, Denars.earn("waiting", character, Denars.pouch(character), 100, true));
+    assertEquals(Result.UNAVAILABLE, Denars.trade("shop-waiting", "shop", Denars.MINT,
+        character, Denars.pouch(character), 100, true));
+    assertEquals(Optional.empty(), Denars.status("waiting"));
+    assertEquals(0, Denars.balance(Denars.pouch(character)));
+    taxAt(10, Denars.TAX_VOID);
+    assertTrue(Denars.taxReady());
+    assertEquals(Result.APPLIED, Denars.earn("waiting", character, Denars.pouch(character), 100, true));
+    assertEquals(90, Denars.balance(Denars.pouch(character)));
+    server.getPluginManager().disablePlugin(factions);
+    assertFalse(Denars.taxReady());
+    assertEquals(Result.UNAVAILABLE, Denars.earn("disabled", character, Denars.pouch(character), 100, true));
+    assertEquals(Result.APPLIED, Denars.earn("untaxed", character, Denars.pouch(character), 100, false));
+    assertEquals(190, Denars.balance(Denars.pouch(character)));
   }
 }
