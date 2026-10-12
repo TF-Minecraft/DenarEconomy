@@ -605,6 +605,8 @@ public class MoneyManager implements Listener{
 			return;
 		}
 		p.getInventory().setItemInMainHand(null);
+		// The credit is already durable; save the emptied hand now so a crash cannot restore the coins.
+		p.saveData();
 		p.playSound(p, Sound.BLOCK_NOTE_BLOCK_CHIME, 1f, 1f);
 	}
 

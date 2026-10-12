@@ -555,7 +555,9 @@ class MoneyManagerTest {
     identity.start(player, character);
     money.toPouch(player);
     assertEquals(450, pouch());
-    verify(inventory).setItemInMainHand(null);
+    var order = inOrder(inventory, player);
+    order.verify(inventory).setItemInMainHand(null);
+    order.verify(player).saveData();
     verify(player).playSound(player, Sound.BLOCK_NOTE_BLOCK_CHIME, 1f, 1f);
     messages.verify(() -> MessageLoader.send(player, "money.earned", "amount", new BigDecimal("4.50")));
 

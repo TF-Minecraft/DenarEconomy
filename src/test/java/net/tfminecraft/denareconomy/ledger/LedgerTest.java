@@ -366,6 +366,8 @@ class LedgerTest {
     assertTrue(latest.getFirst().created() > 0);
     assertEquals(3, ledger.history(List.of(pouch, bank), 20).size());
     assertEquals(Map.of(pouch, 300L), ledger.history(List.of(pouch), 20).getLast().legs());
+    assertEquals(List.of(), ledger.history(List.of(), 20));
+    assertTrue(ledger.isOpen(), "SQLite accepts an empty IN list");
   }
 
   @Test
