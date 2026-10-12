@@ -5,10 +5,13 @@ import org.bukkit.event.Cancellable;
 import org.bukkit.event.Event;
 import org.bukkit.event.HandlerList;
 
+import net.tfminecraft.tlibs.character.CharacterRef;
+
 public class PlayerBankPulseEvent extends Event implements Cancellable{
 	private static final HandlerList HANDLERS = new HandlerList();
     private boolean isCancelled;
     private final Player p;
+    private final CharacterRef character;
 	@Override
 	public boolean isCancelled() {
 		return this.isCancelled;
@@ -19,8 +22,9 @@ public class PlayerBankPulseEvent extends Event implements Cancellable{
 		this.isCancelled = arg0;
 		
 	}
-	public PlayerBankPulseEvent(Player p) {
+	public PlayerBankPulseEvent(Player p, CharacterRef character) {
     	this.p = p;
+    	this.character = character;
     }
 
 	@Override
@@ -34,4 +38,9 @@ public class PlayerBankPulseEvent extends Event implements Cancellable{
 	public Player getPlayer() {
         return this.p;
     }
+
+	/** The character the player is playing. */
+	public CharacterRef getCharacter() {
+		return character;
+	}
 }

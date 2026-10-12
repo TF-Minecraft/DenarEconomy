@@ -9,11 +9,13 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 import net.tfminecraft.denareconomy.accounts.OfflineModifier;
-import net.tfminecraft.denareconomy.data.PlayerData;
-import net.tfminecraft.denareconomy.database.Database;
+import net.tfminecraft.denareconomy.api.Denars;
+import net.tfminecraft.denareconomy.ledger.Ledger;
 import net.tfminecraft.denareconomy.loaders.CoinLoader;
 import net.tfminecraft.denareconomy.loaders.DropLoader;
 import net.tfminecraft.denareconomy.loaders.MessageLoader;
+import net.tfminecraft.denareconomy.testing.FakeIdentity;
+import net.tfminecraft.tlibs.character.CharacterRef;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Player;
@@ -21,6 +23,7 @@ import org.bukkit.scheduler.BukkitScheduler;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockbukkit.mockbukkit.MockBukkit;
+import org.mockbukkit.mockbukkit.ServerMock;
 
 class DenarEconomyTest {
   @TempDir Path directory;
@@ -33,7 +36,7 @@ class DenarEconomyTest {
     doNothing().when(plugin).saveResource(anyString(), eq(false));
     plugin.createFolders();
     assertTrue(Files.isDirectory(data.resolve("Data")));
-    assertTrue(Files.isDirectory(data.resolve("PlayerData")));
+    assertFalse(Files.exists(data.resolve("PlayerData")), "Legacy account files are no longer written");
     plugin.createFolders();
     Files.writeString(data.resolve("coins.yml"), "keep: existing");
     plugin.createConfigs();
@@ -44,65 +47,32 @@ class DenarEconomyTest {
   }
 
   @Test
-  void disableRetriesOfflineSessionsAndContinuesSavingAndCleaningUpAfterFailure() {
-    UUID failedId = UUID.randomUUID();
-    UUID savedId = UUID.randomUUID();
-    PlayerData failed = new PlayerData(failedId);
-    PlayerData saved = new PlayerData(savedId);
-    failed.getBank().setBal(200);
-    saved.getBank().setBal(300);
-    var manager = DenarEconomy.getPlayerManager();
-    var money = DenarEconomy.getMoneyManager();
-    manager.keep(failed);
-    manager.keep(saved);
-    ArmorStand stand = mock(ArmorStand.class);
-    money.getStandMap().put(failedId, stand);
-    money.getTaskMap().put(failedId, 17);
-    var failure = new java.io.UncheckedIOException(new java.io.IOException("disk unavailable"));
-    var logger = mock(java.util.logging.Logger.class);
-    BukkitScheduler scheduler = mock(BukkitScheduler.class);
-    DenarEconomy plugin = mock(DenarEconomy.class, CALLS_REAL_METHODS);
-    try (var database = mockStatic(Database.class);
-        var bukkit = mockStatic(Bukkit.class)) {
-      bukkit.when(Bukkit::getOnlinePlayers).thenReturn(List.of());
-      bukkit.when(Bukkit::getLogger).thenReturn(logger);
-      bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
-      database.when(() -> Database.savePlayerData(failed)).thenThrow(failure);
-      assertDoesNotThrow(plugin::onDisable);
-      assertSame(failed, manager.peek(failedId));
-      assertFalse(manager.exists(savedId));
-      database.verify(() -> Database.savePlayerData(saved));
-      verify(logger)
-          .log(eq(java.util.logging.Level.SEVERE), contains(failedId.toString()), same(failure));
-      verify(stand).remove();
-      verify(scheduler).cancelTask(17);
-      assertTrue(money.getStandMap().isEmpty());
-      assertTrue(money.getTaskMap().isEmpty());
-      database.when(() -> Database.savePlayerData(failed)).thenAnswer(invocation -> null);
-      plugin.onDisable();
-      assertFalse(manager.exists(failedId));
-      database.verify(() -> Database.savePlayerData(failed), times(2));
-    } finally {
-      manager.drop(failedId);
-      manager.drop(savedId);
-      money.getStandMap().clear();
-      money.getTaskMap().clear();
-    }
-  }
-
-  @Test
-  void enableLoadsConfigsRegistersCommandsAndSessionsAndDisableCleansUp() {
+  void enableOpensTheLedgerMovesLegacyMoneyAndDisableClosesItAndCleansUp() throws Exception {
     DenarEconomy previous = DenarEconomy.plugin;
     UUID id = UUID.randomUUID();
-    try (var database = mockStatic(Database.class);
-        var offline = mockStatic(OfflineModifier.class);
+    try (var offline = mockStatic(OfflineModifier.class);
         var coins = mockConstruction(CoinLoader.class);
         var drops = mockConstruction(DropLoader.class);
         var messages = mockConstruction(MessageLoader.class)) {
-      var server = MockBukkit.mock();
+      ServerMock server = MockBukkit.mock();
+      FakeIdentity identity = FakeIdentity.register();
+      identity.heirsReady = true;
       Player online = server.addPlayer();
       id = online.getUniqueId();
       UUID playerId = id;
+      CharacterRef heir = identity.character(id);
+      identity.heirs.put(id, heir);
+      Path legacy =
+          server
+              .getPluginManager()
+              .getParentTemporaryDirectory()
+              .toPath()
+              .resolve("DenarEconomy-test")
+              .resolve("PlayerData");
+      Files.createDirectories(legacy);
+      Files.writeString(
+          legacy.resolve(id + ".json"),
+          "{\"pouch\":{\"amount\":2.5},\"bank\":{\"amount\":3}}");
       DenarEconomy plugin =
           MockBukkit.loadWith(
               DenarEconomy.class,
@@ -124,7 +94,11 @@ class DenarEconomyTest {
           plugin.getCommand("deco").getExecutor(), plugin.getCommand("deco").getTabCompleter());
       assertSame(
           plugin.getCommand("pouch").getExecutor(), plugin.getCommand("pouch").getTabCompleter());
-      assertTrue(DenarEconomy.getPlayerManager().exists(online));
+      assertTrue(new File(plugin.getDataFolder(), "ledger.db").isFile());
+      assertTrue(DenarEconomy.getLedger().isOpen());
+      assertTrue(new File(plugin.getDataFolder(), "PlayerData.imported").isDirectory());
+      assertEquals(250, Denars.balance(Denars.pouch(heir)));
+      assertEquals(300, Denars.balance(Denars.bank(heir)));
       offline.verify(OfflineModifier::load);
       offline.verify(() -> OfflineModifier.remember(online.getName(), playerId));
       verify(coins.constructed().getFirst())
@@ -135,7 +109,6 @@ class DenarEconomyTest {
       for (String name : List.of("coins.yml", "drops.yml", "messages.yml")) {
         assertTrue(new File(plugin.getDataFolder(), name).isFile());
       }
-      PlayerData session = DenarEconomy.getPlayerManager().get(online);
       ArmorStand live = mock(ArmorStand.class);
       ArmorStand dead = mock(ArmorStand.class);
       when(dead.isDead()).thenReturn(true);
@@ -145,27 +118,24 @@ class DenarEconomyTest {
       money.getStandMap().put(UUID.randomUUID(), null);
       money.getTaskMap().put(id, 17);
       BukkitScheduler scheduler = mock(BukkitScheduler.class);
-      try (var bukkit = mockStatic(Bukkit.class)) {
-        bukkit.when(Bukkit::getOnlinePlayers).thenReturn(List.of(online));
+      Ledger ledger = DenarEconomy.getLedger();
+      try (var bukkit = mockStatic(Bukkit.class, CALLS_REAL_METHODS)) {
         bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
         plugin.onDisable();
-        database.verify(() -> Database.savePlayerData(session));
+        assertFalse(ledger.isOpen());
         verify(live).remove();
         verify(dead, never()).remove();
         verify(scheduler).cancelTask(17);
         assertTrue(money.getStandMap().isEmpty());
         assertTrue(money.getTaskMap().isEmpty());
-        bukkit.when(Bukkit::getOnlinePlayers).thenReturn(List.of());
         plugin.onDisable();
         verifyNoMoreInteractions(scheduler);
       }
     } finally {
-      try (var database = mockStatic(Database.class)) {
-        MockBukkit.unmock();
-      }
-      DenarEconomy.getPlayerManager().drop(id);
+      MockBukkit.unmock();
       DenarEconomy.getMoneyManager().getStandMap().clear();
       DenarEconomy.getMoneyManager().getTaskMap().clear();
+      DenarEconomy.setLedger(Ledger.unavailable());
       DenarEconomy.plugin = previous;
     }
   }

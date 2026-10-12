@@ -5,144 +5,189 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import java.math.BigDecimal;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 import net.tfminecraft.denareconomy.DenarEconomy;
-import net.tfminecraft.denareconomy.accounts.OfflineModifier;
-import net.tfminecraft.denareconomy.data.PlayerData;
-import net.tfminecraft.denareconomy.database.BalTopEntry;
-import net.tfminecraft.denareconomy.database.Database;
-import net.tfminecraft.denareconomy.enums.Accounts;
+import net.tfminecraft.denareconomy.api.Denars;
+import net.tfminecraft.denareconomy.api.Leg;
 import net.tfminecraft.denareconomy.event.PlayerBankPulseEvent;
 import net.tfminecraft.denareconomy.item.Coin;
+import net.tfminecraft.denareconomy.ledger.AccountIds;
 import net.tfminecraft.denareconomy.loaders.CoinLoader;
 import net.tfminecraft.denareconomy.loaders.MessageLoader;
-import org.bukkit.Bukkit;
-import org.bukkit.Sound;
-import org.bukkit.World;
+import net.tfminecraft.denareconomy.testing.FakeIdentity;
+import net.tfminecraft.denareconomy.testing.Money;
+import net.tfminecraft.tlibs.character.CharacterRef;
+import org.bukkit.Material;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.PlayerInventory;
-import org.bukkit.plugin.PluginManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockbukkit.mockbukkit.MockBukkit;
+import org.mockbukkit.mockbukkit.ServerMock;
+import org.mockbukkit.mockbukkit.entity.PlayerMock;
 import org.mockito.MockedStatic;
 
 class CommandManagerTest {
+  @TempDir Path folder;
   private final CommandManager commands = new CommandManager();
-  private Player player;
+  private ServerMock server;
+  private FakeIdentity identity;
+  private PlayerMock player;
+  private CharacterRef character;
   private Command deco;
   private MoneyManager money;
-  private PlayerData data;
-  private PluginManager events;
+  private Logger logger;
+  private final List<PlayerBankPulseEvent> pulses = new java.util.ArrayList<>();
   private MockedStatic<DenarEconomy> economy;
   private MockedStatic<MessageLoader> messages;
-  private MockedStatic<Bukkit> bukkit;
   private MockedStatic<CoinLoader> coins;
   private DenarEconomy previousPlugin;
 
   @BeforeEach
-  void setUp() {
-    player = mock(Player.class);
+  void setUp() throws Exception {
+    server = MockBukkit.mock();
+    Money.open(folder);
+    identity = FakeIdentity.register();
+    player = server.addPlayer("Alex");
+    character = identity.play(player);
     deco = command("deco");
+    previousPlugin = DenarEconomy.plugin;
+    DenarEconomy.plugin = mock(DenarEconomy.class);
+    logger = mock(Logger.class);
+    when(DenarEconomy.plugin.getLogger()).thenReturn(logger);
+    when(DenarEconomy.plugin.getDataFolder()).thenReturn(folder.toFile());
     money = mock(MoneyManager.class);
-    data = new PlayerData(UUID.randomUUID());
-    PlayerManager players = mock(PlayerManager.class);
-    when(players.get(player)).thenReturn(data);
-    economy = mockStatic(DenarEconomy.class);
-    economy.when(DenarEconomy::getPlayerManager).thenReturn(players);
+    when(money.holder(any())).thenCallRealMethod();
+    economy = mockStatic(DenarEconomy.class, CALLS_REAL_METHODS);
     economy.when(DenarEconomy::getMoneyManager).thenReturn(money);
     messages = mockStatic(MessageLoader.class);
-    bukkit = mockStatic(Bukkit.class);
-    events = mock(PluginManager.class);
-    bukkit.when(Bukkit::getPluginManager).thenReturn(events);
     coins = mockStatic(CoinLoader.class);
-    previousPlugin = DenarEconomy.plugin;
+    server
+        .getPluginManager()
+        .registerEvent(
+            PlayerBankPulseEvent.class,
+            new Listener() {},
+            EventPriority.NORMAL,
+            (listener, event) -> pulses.add((PlayerBankPulseEvent) event),
+            MockBukkit.createMockPlugin());
   }
 
   @AfterEach
   void tearDown() {
-    DenarEconomy.plugin = previousPlugin;
     coins.close();
-    bukkit.close();
     messages.close();
     economy.close();
+    Money.close();
+    MockBukkit.unmock();
+    DenarEconomy.plugin = previousPlugin;
+  }
+
+  long pouch() {
+    return Denars.balance(Denars.pouch(character));
+  }
+
+  long bank() {
+    return Denars.balance(Denars.bank(character));
   }
 
   @Test
   void dispatchRejectsConsoleAndUnknownCommandsAndOpensPouch() {
-    CommandSender console = mock(CommandSender.class);
-    assertFalse(commands.onCommand(console, deco, "deco", new String[0]));
+    CommandSender console = server.getConsoleSender();
+    assertFalse(commands.onCommand(console, deco, "deco", new String[] {"bal"}));
     messages.verify(() -> MessageLoader.send(console, "general.players-only"));
     assertFalse(run());
     assertTrue(run("unknown"));
     messages.verify(() -> MessageLoader.send(player, "general.unknown-subcommand"), times(2));
-    assertFalse(commands.onCommand(player, command("other"), "other", new String[] {"bal"}));
-    assertTrue(commands.onCommand(player, command("POUCH"), "pouch", new String[0]));
+    assertTrue(commands.onCommand(player, command("pouch"), "pouch", new String[0]));
     verify(money).showPouch(player);
+    assertFalse(commands.onCommand(player, command("other"), "other", new String[] {"bal"}));
   }
 
   @Test
   void reloadAllowsConsoleOperatorsAndPermissionButRejectsUnprivilegedPlayers() {
-    DenarEconomy.plugin = mock(DenarEconomy.class);
     assertTrue(run("reload"));
     messages.verify(() -> MessageLoader.send(player, "errors.no-permission"));
-    verify(DenarEconomy.plugin, never()).loadConfigs();
-    when(player.hasPermission("denareconomy.reload")).thenReturn(true);
-    assertTrue(run("ReLoAd"));
-    when(player.hasPermission("denareconomy.reload")).thenReturn(false);
-    when(player.isOp()).thenReturn(true);
+    player.addAttachment(MockBukkit.createMockPlugin(), "denareconomy.reload", true);
     assertTrue(run("reload"));
-    CommandSender console = mock(CommandSender.class);
+    PlayerMock op = server.addPlayer("Op");
+    op.setOp(true);
+    assertTrue(commands.onCommand(op, deco, "deco", new String[] {"reload"}));
+    CommandSender console = server.getConsoleSender();
     assertTrue(commands.onCommand(console, deco, "deco", new String[] {"reload"}));
     verify(DenarEconomy.plugin, times(3)).loadConfigs();
     messages.verify(() -> MessageLoader.send(console, "general.reload-ok"));
   }
 
   @Test
-  void balanceDisplaysBothAccountsAndRankingDisplaysSortedDatabaseResults() {
-    data.getPouch().change(10);
-    data.getBank().change(20);
+  void balanceShowsTheCurrentCharactersAccounts() {
+    Money.fund(Denars.pouch(character), 1000);
+    Money.fund(Denars.bank(character), 2050);
     assertTrue(run("bal"));
-    messages.verify(() -> MessageLoader.send(player, "balance.pouch", "amount", 10.0));
-    messages.verify(() -> MessageLoader.send(player, "balance.bank", "amount", 20.0));
-    try (MockedStatic<Database> database = mockStatic(Database.class)) {
-      database
-          .when(() -> Database.getTopBalances(20))
-          .thenReturn(List.of(new BalTopEntry("Alex", 30), new BalTopEntry("Sam", 12.5)));
-      assertTrue(run("baltop"));
-      messages.verify(() -> MessageLoader.send(player, "baltop.header", "limit", 20));
-      messages.verify(
-          () ->
-              MessageLoader.send(
-                  player,
-                  "baltop.entry",
-                  "rank",
-                  1,
-                  "name",
-                  "Alex",
-                  "amount",
-                  String.format("%.2f", 30.0)));
-      messages.verify(
-          () ->
-              MessageLoader.send(
-                  player,
-                  "baltop.entry",
-                  "rank",
-                  2,
-                  "name",
-                  "Sam",
-                  "amount",
-                  String.format("%.2f", 12.5)));
-      messages.verify(() -> MessageLoader.send(player, "baltop.footer"));
-    }
+    messages.verify(
+        () -> MessageLoader.send(player, "balance.pouch", "amount", new BigDecimal("10.00")));
+    messages.verify(
+        () -> MessageLoader.send(player, "balance.bank", "amount", new BigDecimal("20.50")));
+  }
+
+  @Test
+  void moneyCommandsNeedACharacterAndAnOpenLedger() {
+    identity.stop(player);
+    run("bal");
+    run("deposit", "1");
+    run("toitem", "1");
+    when(money.amountToItems(1, 0, .01)).thenReturn(List.of(new ItemStack(Material.GOLD_NUGGET)));
+    run("toitem", "1");
+    messages.verify(() -> MessageLoader.send(player, "errors.no-character"), times(3));
+    assertTrue(pulses.isEmpty());
+    identity.play(player);
+    Money.close();
+    run("withdraw", "1");
+    messages.verify(() -> MessageLoader.send(player, "errors.ledger-unavailable"));
+    assertTrue(pulses.isEmpty());
+  }
+
+  @Test
+  void rankingListsTheRichestCharacters() {
+    CharacterRef other = identity.character(UUID.randomUUID());
+    Money.fund(Denars.pouch(character), 1250);
+    Money.fund(Denars.bank(other), 3000);
+    assertTrue(run("baltop"));
+    messages.verify(() -> MessageLoader.send(player, "baltop.header", "limit", 20));
+    String otherName = "Char-" + other.characterId().toString().substring(0, 4);
+    String ownName = "Char-" + character.characterId().toString().substring(0, 4);
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                player,
+                "baltop.entry",
+                "rank",
+                1,
+                "name",
+                otherName,
+                "amount",
+                String.format("%.2f", 30.0)));
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                player,
+                "baltop.entry",
+                "rank",
+                2,
+                "name",
+                ownName,
+                "amount",
+                String.format("%.2f", 12.5)));
+    messages.verify(() -> MessageLoader.send(player, "baltop.footer"));
   }
 
   @ParameterizedTest
@@ -154,36 +199,34 @@ class CommandManagerTest {
     run(command, "0");
     run(command, "-1");
     messages.verify(() -> MessageLoader.send(player, "errors.invalid-amount"), times(3));
-    assertEquals(0, data.getPouch().getBal());
-    assertEquals(0, data.getBank().getBal());
-    verifyNoInteractions(money);
+    verify(money, never()).pay(any(), anyLong());
+    assertEquals(0, Denars.balance(Denars.MINT));
   }
 
   @Test
-  void payDelegatesValidatedAmount() {
+  void payDelegatesValidatedCents() {
     assertTrue(run("pay", "12.5"));
-    verify(money).pay(player, 12.5);
+    verify(money).pay(player, 1250);
   }
 
   @ParameterizedTest
   @ValueSource(strings = {"0.005", "0.015", "0.010000000000000001", "NaN", "Infinity", "1e1000"})
   void coinCommandsRejectFractionalCentsAndNonFiniteAmounts(String amount) {
-    data.getPouch().setBal(5);
+    Money.fund(Denars.pouch(character), 500);
     run("pay", amount);
     run("toitem", amount);
-    assertEquals(5, data.getPouch().getBal());
-    verifyNoInteractions(money);
+    assertEquals(500, pouch());
+    verify(money, never()).pay(any(), anyLong());
     messages.verify(() -> MessageLoader.send(player, "errors.invalid-amount"), times(2));
   }
 
   @Test
   void emptyItemConversionLeavesPouchUntouched() {
-    data.getPouch().setBal(5);
+    Money.fund(Denars.pouch(character), 500);
     when(money.amountToItems(3, 0, .01)).thenReturn(List.of());
     run("toitem", "3");
-    assertEquals(5, data.getPouch().getBal());
+    assertEquals(500, pouch());
     messages.verify(() -> MessageLoader.send(player, "errors.coins-unavailable"));
-    verify(player, never()).getInventory();
   }
 
   @Test
@@ -191,11 +234,10 @@ class CommandManagerTest {
     Coin coin = coin("gold", 2.5, true);
     coins.when(() -> CoinLoader.getByString("gold")).thenReturn(coin);
     when(money.coinItems(coin, 2)).thenReturn(List.of());
-    data.getPouch().setBal(5);
+    Money.fund(Denars.pouch(character), 500);
     run("toitem", "2", "gold");
-    assertEquals(5, data.getPouch().getBal());
+    assertEquals(500, pouch());
     messages.verify(() -> MessageLoader.send(player, "errors.coins-unavailable"));
-    verify(player, never()).getInventory();
   }
 
   @Test
@@ -211,28 +253,26 @@ class CommandManagerTest {
     coins.when(() -> CoinLoader.getByString("gold")).thenReturn(valid);
     run("toitem", "1.5", "gold");
     messages.verify(() -> MessageLoader.send(player, "errors.invalid-count"));
-    verifyNoInteractions(money);
+    verify(money, never()).coinItems(any(), anyLong());
   }
 
   @Test
-  void toItemChecksCostAndGivesOrDropsItems() {
-    ItemStack first = mock(ItemStack.class);
-    ItemStack second = mock(ItemStack.class);
+  void toItemChargesThePouchThenGivesOrDropsTheCoins() {
+    ItemStack first = new ItemStack(Material.GOLD_NUGGET, 64);
+    ItemStack second = new ItemStack(Material.IRON_NUGGET, 1);
     when(money.amountToItems(5, 0, .01)).thenReturn(List.of(first, second));
     run("toitem", "5");
     messages.verify(() -> MessageLoader.send(player, "errors.not-enough-pouch"));
-    data.getPouch().change(10);
-    PlayerInventory inventory = mock(PlayerInventory.class);
-    World world = mock(World.class);
-    when(player.getInventory()).thenReturn(inventory);
-    when(player.getWorld()).thenReturn(world);
-    when(inventory.addItem(first)).thenReturn(new java.util.HashMap<>());
-    when(inventory.addItem(second))
-        .thenReturn(new java.util.HashMap<>(java.util.Map.of(0, second)));
+    assertFalse(player.getInventory().contains(Material.GOLD_NUGGET));
+    Money.fund(Denars.pouch(character), 1000);
+    for (int slot = 0; slot < 36; slot++) {
+      if (slot != 0) player.getInventory().setItem(slot, new ItemStack(Material.STONE, 64));
+    }
     run("toitem", "5");
-    assertEquals(5, data.getPouch().getBal());
-    verify(inventory).addItem(first);
-    verify(world).dropItem(player.getLocation(), second);
+    assertEquals(500, pouch());
+    assertEquals(-500, Denars.balance(Denars.MINT));
+    assertEquals(64, player.getInventory().getItem(0).getAmount());
+    assertEquals(1, player.getWorld().getEntities().size(), "The coin that did not fit is dropped");
   }
 
   @ParameterizedTest
@@ -241,70 +281,78 @@ class CommandManagerTest {
     Coin coin = coin("gold", 2.5, true);
     coins.when(() -> CoinLoader.getByString("gold")).thenReturn(coin);
     coins.when(() -> CoinLoader.getWithdrawableByValue(2.5)).thenReturn(coin);
-    ItemStack payout = mock(ItemStack.class);
-    when(money.coinItems(coin, 2)).thenReturn(List.of(payout));
-    PlayerInventory inventory = mock(PlayerInventory.class);
-    when(player.getInventory()).thenReturn(inventory);
-    data.getPouch().change(5);
+    when(money.coinItems(coin, 2)).thenReturn(List.of(new ItemStack(Material.GOLD_NUGGET, 2)));
+    Money.fund(Denars.pouch(character), 600);
     run("toitem", "2", token);
-    assertEquals(0, data.getPouch().getBal());
-    verify(money).coinItems(coin, 2);
-    verify(inventory).addItem(payout);
+    assertEquals(100, pouch());
+    assertTrue(player.getInventory().contains(Material.GOLD_NUGGET, 2));
   }
 
   @ParameterizedTest
   @ValueSource(strings = {"deposit", "withdraw"})
   void cancelledBankPulseDoesNotMoveMoneyOrValidateAmounts(String command) {
-    doAnswer(
-            invocation -> {
-              ((PlayerBankPulseEvent) invocation.getArgument(0)).setCancelled(true);
-              return null;
-            })
-        .when(events)
-        .callEvent(any(PlayerBankPulseEvent.class));
+    server
+        .getPluginManager()
+        .registerEvent(
+            PlayerBankPulseEvent.class,
+            new Listener() {},
+            EventPriority.HIGH,
+            (listener, event) -> ((PlayerBankPulseEvent) event).setCancelled(true),
+            MockBukkit.createMockPlugin());
     run(command);
-    verify(events).callEvent(any(PlayerBankPulseEvent.class));
+    assertEquals(1, pulses.size());
+    assertSame(player, pulses.getFirst().getPlayer());
+    assertEquals(character, pulses.getFirst().getCharacter());
     messages.verifyNoInteractions();
   }
 
   @ParameterizedTest
   @ValueSource(strings = {"deposit", "withdraw"})
-  void bankTransfersAreAtomicAndReportNewBalances(String command) {
+  void bankTransfersMoveBetweenTheCharactersAccountsAndReport(String command) {
     boolean deposit = command.equals("deposit");
     run(command, "4.25");
     String error = deposit ? "errors.not-enough-pouch" : "errors.not-enough-bank";
     messages.verify(() -> MessageLoader.send(player, error));
-    data.getPouch().change(10);
-    data.getBank().change(10);
+    Money.fund(Denars.pouch(character), 1000);
+    Money.fund(Denars.bank(character), 1000);
     String actionKey = deposit ? "bank.deposited" : "bank.withdrew";
     messages.when(() -> MessageLoader.get(actionKey)).thenReturn("Action");
     run(command, "4.25");
-    assertEquals(deposit ? 5.75 : 14.25, data.getPouch().getBal());
-    assertEquals(deposit ? 14.25 : 5.75, data.getBank().getBal());
+    assertEquals(deposit ? 575 : 1425, pouch());
+    assertEquals(deposit ? 1425 : 575, bank());
     messages.verify(() -> MessageLoader.send(player, "bank.header"));
     messages.verify(
         () ->
             MessageLoader.send(
                 player, "bank.action", "action", "Action", "amount", new BigDecimal("4.25")));
     messages.verify(
-        () -> MessageLoader.send(player, "bank.new-bank", "amount", data.getBank().getBal()));
+        () ->
+            MessageLoader.send(
+                player, "bank.new-bank", "amount", BigDecimal.valueOf(bank(), 2)));
     messages.verify(
-        () -> MessageLoader.send(player, "bank.new-pouch", "amount", data.getPouch().getBal()));
+        () ->
+            MessageLoader.send(
+                player, "bank.new-pouch", "amount", BigDecimal.valueOf(pouch(), 2)));
     messages.verify(() -> MessageLoader.send(player, "bank.footer"));
-    verify(player).playSound(player, Sound.BLOCK_NOTE_BLOCK_CHIME, 1f, 1f);
   }
 
   @Test
-  void completionsFilterCaseInsensitivelyAndRespectReloadPermission() {
-    assertEquals(List.of("bal", "pay", "toitem", "topouch", "deposit", "withdraw", "baltop"), tab(""));
+  void completionsFilterCaseInsensitivelyAndRespectPermissions() {
+    assertEquals(
+        List.of("bal", "pay", "toitem", "topouch", "deposit", "withdraw", "baltop", "history"),
+        tab(""));
     assertEquals(List.of("bal", "baltop"), tab("BA"));
     assertEquals(List.of(), tab("re"));
-    when(player.hasPermission("denareconomy.reload")).thenReturn(true);
+    assertEquals(List.of(), tab("legacy", ""));
+    player.addAttachment(MockBukkit.createMockPlugin(), "denareconomy.reload", true);
     assertEquals(List.of("reload"), tab("re"));
+    player.addAttachment(MockBukkit.createMockPlugin(), "denareconomy.admin", true);
+    assertEquals(List.of("legacy"), tab("le"));
+    assertEquals(List.of("assign"), tab("legacy", "a"));
     assertTrue(
         commands
-            .onTabComplete(mock(CommandSender.class), deco, "deco", new String[] {""})
-            .contains("reload"));
+            .onTabComplete(server.getConsoleSender(), deco, "deco", new String[] {""})
+            .containsAll(List.of("reload", "give", "legacy")));
     for (String name : List.of("pay", "toitem", "deposit", "withdraw")) {
       assertEquals(List.of("<amount>"), tab(name, ""));
     }
@@ -331,143 +379,243 @@ class CommandManagerTest {
 
   @Test
   void giveRejectsPlayersWithoutOperatorStatusOrPermission() {
-    try (MockedStatic<OfflineModifier> offline = mockStatic(OfflineModifier.class)) {
-      assertTrue(run("give", "Alex", "5"));
-      messages.verify(() -> MessageLoader.send(player, "errors.no-permission"));
-      offline.verifyNoInteractions();
-    }
+    assertTrue(run("give", "Alex", "5"));
+    messages.verify(() -> MessageLoader.send(player, "errors.no-permission"));
+    assertEquals(0, bank());
   }
 
   @Test
   void giveValidatesUsageAmountAccountAndPlayer() {
-    CommandSender console = mock(CommandSender.class);
-    try (MockedStatic<OfflineModifier> offline = mockStatic(OfflineModifier.class)) {
-      give(console);
-      give(console, "Alex");
-      give(console, "Alex", "5", "bank", "extra");
-      give(console, "Alex", "5", "wallet");
-      messages.verify(() -> MessageLoader.send(console, "errors.give-usage"), times(4));
-      give(console, "Alex", "0.005");
-      give(console, "Alex", "-1");
-      messages.verify(() -> MessageLoader.send(console, "errors.invalid-amount"), times(2));
-      give(console, "Nobody", "5");
-      messages.verify(
-          () -> MessageLoader.send(console, "errors.unknown-player", "player", "Nobody"));
-      offline.verify(() -> OfflineModifier.apply(any(UUID.class), any(), anyDouble()), never());
-    }
+    CommandSender console = server.getConsoleSender();
+    give(console);
+    give(console, "Alex");
+    give(console, "Alex", "5", "bank", "extra");
+    give(console, "Alex", "5", "wallet");
+    messages.verify(() -> MessageLoader.send(console, "errors.give-usage"), times(4));
+    give(console, "Alex", "0.005");
+    give(console, "Alex", "-1");
+    messages.verify(() -> MessageLoader.send(console, "errors.invalid-amount"), times(2));
+    give(console, "Nobody", "5");
+    messages.verify(() -> MessageLoader.send(console, "errors.unknown-player", "player", "Nobody"));
+    server.addPlayer("Idle");
+    give(console, "Idle", "5");
+    messages.verify(() -> MessageLoader.send(console, "errors.unknown-player", "player", "Idle"));
+    assertEquals(0, Denars.balance(Denars.MINT));
   }
 
   @Test
-  void giveCreditsTheBankByDefaultAndThePouchOnRequest() {
-    Logger logger = pluginLogger();
-    CommandSender console = mock(CommandSender.class);
-    when(console.getName()).thenReturn("CONSOLE");
-    UUID id = UUID.randomUUID();
-    try (MockedStatic<OfflineModifier> offline = mockStatic(OfflineModifier.class)) {
-      offline.when(() -> OfflineModifier.playerId("Alex")).thenReturn(id);
-      offline.when(() -> OfflineModifier.apply(eq(id), any(), anyDouble())).thenReturn(true);
-      give(console, "Alex", "12.5");
-      give(console, "Alex", "0.02", "POUCH");
-      give(console, "Alex", "3", "Bank");
-      offline.verify(() -> OfflineModifier.apply(id, Accounts.BANK, 12.5));
-      offline.verify(() -> OfflineModifier.apply(id, Accounts.POUCH, 0.02));
-      offline.verify(() -> OfflineModifier.apply(id, Accounts.BANK, 3.0));
-      messages.verify(
-          () ->
-              MessageLoader.send(
-                  console,
-                  "give.sent",
-                  "amount",
-                  new BigDecimal("12.50"),
-                  "player",
-                  "Alex",
-                  "account",
-                  "bank"));
-      messages.verify(
-          () ->
-              MessageLoader.send(
-                  console,
-                  "give.sent",
-                  "amount",
-                  new BigDecimal("0.02"),
-                  "player",
-                  "Alex",
-                  "account",
-                  "pouch"));
-      verify(logger).info("CONSOLE gave 12.50 to Alex (" + id + ") bank");
-      verify(logger).info("CONSOLE gave 0.02 to Alex (" + id + ") pouch");
-      // Alex is offline, so only the sender hears about it.
-      messages.verify(() -> MessageLoader.send(any(Player.class), eq("give.received"), any()), never());
-    }
+  void giveCreditsTheCurrentCharactersBankByDefaultAndThePouchOnRequest() {
+    CommandSender console = server.getConsoleSender();
+    give(console, "Alex", "12.5");
+    give(console, "Alex", "0.02", "POUCH");
+    give(console, "Alex", "3", "Bank");
+    assertEquals(1550, bank());
+    assertEquals(2, pouch());
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                console,
+                "give.sent",
+                "amount",
+                new BigDecimal("12.50"),
+                "player",
+                "Alex",
+                "account",
+                "bank"));
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                player, "give.received", "amount", new BigDecimal("0.02"), "account", "pouch"));
+    verify(logger)
+        .info(
+            "CONSOLE gave 12.50 to Alex (character " + character.characterId() + ") bank");
+    // Even a dead character can be credited.
+    identity.kill(character);
+    PlayerMock admin = server.addPlayer("Admin");
+    admin.addAttachment(MockBukkit.createMockPlugin(), "denareconomy.give", true);
+    assertTrue(commands.onCommand(admin, deco, "deco", new String[] {"GIVE", "Alex", "1"}));
+    assertEquals(1650, bank());
   }
 
   @Test
-  void giveTellsAnOnlineRecipientAndAcceptsOperatorsAndPermissionHolders() {
-    pluginLogger();
-    UUID id = UUID.randomUUID();
-    Player target = mock(Player.class);
-    bukkit.when(() -> Bukkit.getPlayer(id)).thenReturn(target);
-    when(player.getName()).thenReturn("Admin");
-    try (MockedStatic<OfflineModifier> offline = mockStatic(OfflineModifier.class)) {
-      offline.when(() -> OfflineModifier.playerId("Sam")).thenReturn(id);
-      offline.when(() -> OfflineModifier.apply(eq(id), any(), anyDouble())).thenReturn(true);
-      when(player.isOp()).thenReturn(true);
-      assertTrue(run("give", "Sam", "4"));
-      when(player.isOp()).thenReturn(false);
-      when(player.hasPermission("denareconomy.give")).thenReturn(true);
-      assertTrue(run("GIVE", "Sam", "1.25", "pouch"));
-      offline.verify(() -> OfflineModifier.apply(id, Accounts.BANK, 4.0));
-      offline.verify(() -> OfflineModifier.apply(id, Accounts.POUCH, 1.25));
-      messages.verify(
-          () ->
-              MessageLoader.send(
-                  target, "give.received", "amount", new BigDecimal("4.00"), "account", "bank"));
-      messages.verify(
-          () ->
-              MessageLoader.send(
-                  target, "give.received", "amount", new BigDecimal("1.25"), "account", "pouch"));
-    }
-  }
-
-  @Test
-  void giveReportsRefusedAndFailedPaymentsWithoutClaimingSuccess() {
-    Logger logger = pluginLogger();
-    CommandSender console = mock(CommandSender.class);
-    UUID refused = UUID.randomUUID();
-    UUID broken = UUID.randomUUID();
-    IllegalStateException failure = new IllegalStateException("disk full");
-    try (MockedStatic<OfflineModifier> offline = mockStatic(OfflineModifier.class)) {
-      offline.when(() -> OfflineModifier.playerId("Alex")).thenReturn(refused);
-      offline.when(() -> OfflineModifier.playerId("Sam")).thenReturn(broken);
-      offline.when(() -> OfflineModifier.apply(eq(refused), any(), anyDouble())).thenReturn(false);
-      offline
-          .when(() -> OfflineModifier.apply(eq(broken), any(), anyDouble()))
-          .thenThrow(failure);
-      give(console, "Alex", "5");
-      give(console, "Sam", "5");
-      messages.verify(() -> MessageLoader.send(console, "errors.give-failed", "player", "Alex"));
-      messages.verify(() -> MessageLoader.send(console, "errors.give-failed", "player", "Sam"));
-      verify(logger)
-          .log(Level.SEVERE, "Could not give 5.00 to Sam (" + broken + ")", failure);
-      verify(logger, never()).info(anyString());
-      messages.verify(
-          () -> MessageLoader.send(eq(console), eq("give.sent"), any(Object[].class)), never());
-    }
+  void giveReportsAClosedLedgerWithoutClaimingSuccess() {
+    CommandSender console = server.getConsoleSender();
+    Money.close();
+    give(console, "Alex", "5");
+    messages.verify(() -> MessageLoader.send(console, "errors.give-failed", "player", "Alex"));
+    verify(logger, never()).info(anyString());
   }
 
   @Test
   void giveCompletionsNeedPermissionAndSuggestEachArgument() {
-    CommandSender console = mock(CommandSender.class);
-    assertTrue(
-        commands.onTabComplete(console, deco, "deco", new String[] {"g"}).contains("give"));
     assertEquals(List.of(), tab("give", ""));
-    when(player.hasPermission("denareconomy.give")).thenReturn(true);
+    player.addAttachment(MockBukkit.createMockPlugin(), "denareconomy.give", true);
     assertEquals(List.of("give"), tab("gi"));
     assertEquals(List.of("<player>"), tab("give", ""));
     assertEquals(List.of("<amount>"), tab("give", "Alex", ""));
     assertEquals(List.of("bank", "pouch"), tab("give", "Alex", "5", ""));
     assertEquals(List.of("pouch"), tab("Give", "Alex", "5", "P"));
     assertEquals(List.of(), tab("give", "Alex", "5", "bank", ""));
+  }
+
+  @Test
+  void legacyListsUnclaimedMoneyForStaffOnly() {
+    UUID known = player.getUniqueId();
+    UUID unknown = UUID.randomUUID();
+    Money.fund(AccountIds.legacyPouch(known), 150);
+    Money.fund(AccountIds.legacyBank(unknown), 20);
+    run("legacy");
+    messages.verify(() -> MessageLoader.send(player, "errors.no-permission"));
+    CommandSender console = server.getConsoleSender();
+    assertTrue(commands.onCommand(console, deco, "deco", new String[] {"legacy"}));
+    messages.verify(() -> MessageLoader.send(console, "legacy.header", "count", 2));
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                console,
+                "legacy.entry",
+                "account",
+                known,
+                "name",
+                "Alex",
+                "pouch",
+                new BigDecimal("1.50"),
+                "bank",
+                new BigDecimal("0.00")));
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                eq(console),
+                eq("legacy.entry"),
+                eq("account"),
+                eq(unknown),
+                eq("name"),
+                anyString(),
+                eq("pouch"),
+                eq(new BigDecimal("0.00")),
+                eq("bank"),
+                eq(new BigDecimal("0.20"))));
+  }
+
+  @Test
+  void legacyAssignValidatesItsArgumentsAndTheCharactersOwner() {
+    CommandSender console = server.getConsoleSender();
+    UUID account = player.getUniqueId();
+    CharacterRef stranger = identity.character(UUID.randomUUID());
+    legacy(console, "assign", account.toString());
+    legacy(console, "give", account.toString(), character.characterId().toString());
+    legacy(console, "assign", "nope", character.characterId().toString());
+    legacy(console, "assign", account.toString(), "nope");
+    messages.verify(() -> MessageLoader.send(console, "legacy.usage"), times(4));
+    UUID missing = UUID.randomUUID();
+    legacy(console, "assign", account.toString(), missing.toString());
+    legacy(console, "assign", account.toString(), stranger.characterId().toString());
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                console, "legacy.not-owner", "character", missing, "account", account));
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                console,
+                "legacy.not-owner",
+                "character",
+                stranger.characterId(),
+                "account",
+                account));
+    legacy(console, "assign", account.toString(), character.characterId().toString());
+    messages.verify(() -> MessageLoader.send(console, "legacy.nothing", "account", account));
+  }
+
+  @Test
+  void legacyAssignMovesTheMoneyToTheChosenCharacterOnce() {
+    CommandSender console = server.getConsoleSender();
+    UUID account = player.getUniqueId();
+    CharacterRef chosen = identity.character(account);
+    Money.fund(AccountIds.legacyPouch(account), 150);
+    Money.fund(AccountIds.legacyBank(account), 300);
+    legacy(console, "ASSIGN", account.toString(), chosen.characterId().toString());
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                console, "legacy.assigned", "account", account, "character", chosen.characterId()));
+    verify(logger)
+        .info("CONSOLE assigned legacy money of " + account + " to character " + chosen.characterId());
+    assertEquals(150, Denars.balance(Denars.pouch(chosen)));
+    assertEquals(300, Denars.balance(Denars.bank(chosen)));
+    legacy(console, "assign", account.toString(), character.characterId().toString());
+    messages.verify(() -> MessageLoader.send(console, "legacy.nothing", "account", account));
+    assertEquals(0, pouch());
+  }
+
+  @Test
+  void legacyAssignReportsAClaimThatCannotApply() {
+    CommandSender console = server.getConsoleSender();
+    UUID account = player.getUniqueId();
+    Money.fund(AccountIds.legacyPouch(account), 150);
+    Denars.post(
+        "claim:" + account,
+        "claim",
+        List.of(new Leg(Denars.MINT, -1), new Leg(Denars.pouch(character), 1)));
+    legacy(console, "assign", account.toString(), character.characterId().toString());
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                console,
+                "legacy.failed",
+                "account",
+                account,
+                "result",
+                net.tfminecraft.denareconomy.api.Result.CONFLICT));
+    assertEquals(150, Denars.balance(AccountIds.legacyPouch(account)));
+  }
+
+  @Test
+  void historyShowsTheCurrentCharactersLatestPostings() {
+    messages
+        .when(() -> MessageLoader.get(eq("history.change"), any(Object[].class)))
+        .thenAnswer(invocation -> invocation.getArgument(2) + " " + invocation.getArgument(4));
+    Money.fund(Denars.pouch(character), 500);
+    Denars.transfer("d", "deposit", Denars.pouch(character), Denars.bank(character), 200);
+    assertTrue(run("history"));
+    messages.verify(() -> MessageLoader.send(player, "history.header", "player", "Alex", "count", 2));
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                eq(player),
+                eq("history.entry"),
+                eq("time"),
+                anyString(),
+                eq("reason"),
+                eq("deposit"),
+                eq("changes"),
+                eq("pouch -2.00, bank +2.00")));
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                eq(player),
+                eq("history.entry"),
+                eq("time"),
+                anyString(),
+                eq("reason"),
+                eq("staff:test"),
+                eq("changes"),
+                eq("pouch +5.00")));
+  }
+
+  @Test
+  void historyOfAnotherPlayerOrFromConsoleNeedsStaffAndANamedPlayer() {
+    PlayerMock sam = server.addPlayer("Sam");
+    run("history", "Sam");
+    messages.verify(() -> MessageLoader.send(player, "errors.no-permission"));
+    CommandSender console = server.getConsoleSender();
+    commands.onCommand(console, deco, "deco", new String[] {"history"});
+    messages.verify(() -> MessageLoader.send(console, "general.players-only"));
+    commands.onCommand(console, deco, "deco", new String[] {"history", "Sam"});
+    messages.verify(() -> MessageLoader.send(console, "errors.unknown-player", "player", "Sam"));
+    identity.play(sam);
+    commands.onCommand(console, deco, "deco", new String[] {"history", "Sam"});
+    messages.verify(() -> MessageLoader.send(console, "history.header", "player", "Sam", "count", 0));
   }
 
   private void give(CommandSender sender, String... args) {
@@ -477,11 +625,11 @@ class CommandManagerTest {
     assertTrue(commands.onCommand(sender, deco, "deco", full));
   }
 
-  private Logger pluginLogger() {
-    DenarEconomy.plugin = mock(DenarEconomy.class);
-    Logger logger = mock(Logger.class);
-    when(DenarEconomy.plugin.getLogger()).thenReturn(logger);
-    return logger;
+  private void legacy(CommandSender sender, String... args) {
+    String[] full = new String[args.length + 1];
+    full[0] = "legacy";
+    System.arraycopy(args, 0, full, 1, args.length);
+    assertTrue(commands.onCommand(sender, deco, "deco", full));
   }
 
   private boolean run(String... args) {

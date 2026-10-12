@@ -21,3 +21,6 @@ permissions:
   denareconomy.give:
     description: Credit a player's bank or pouch with /deco give
     default: op
+  denareconomy.admin:
+    description: List and assign unclaimed legacy money, and read other players' ledger history
+    default: op

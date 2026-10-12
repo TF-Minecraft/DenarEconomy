@@ -6,10 +6,13 @@ import org.bukkit.event.Event;
 import org.bukkit.event.HandlerList;
 import org.bukkit.inventory.ItemStack;
 
+import net.tfminecraft.tlibs.character.CharacterRef;
+
 public class PlayerDepositMaterialsEvent extends Event implements Cancellable{
 	private static final HandlerList HANDLERS = new HandlerList();
     private boolean isCancelled;
     private final Player p;
+    private final CharacterRef character;
     private final ItemStack item;
 	@Override
 	public boolean isCancelled() {
@@ -21,8 +24,9 @@ public class PlayerDepositMaterialsEvent extends Event implements Cancellable{
 		this.isCancelled = arg0;
 		
 	}
-	public PlayerDepositMaterialsEvent(Player p, ItemStack i) {
+	public PlayerDepositMaterialsEvent(Player p, ItemStack i, CharacterRef character) {
     	this.p = p;
+    	this.character = character;
     	this.item= i;
     }
 
@@ -40,4 +44,9 @@ public class PlayerDepositMaterialsEvent extends Event implements Cancellable{
     public ItemStack getItem() {
     	return this.item;
     }
+
+	/** The character the player is playing. */
+	public CharacterRef getCharacter() {
+		return character;
+	}
 }
