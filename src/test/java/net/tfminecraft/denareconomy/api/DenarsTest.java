@@ -200,4 +200,62 @@ class DenarsTest {
     assertEquals(0, Denars.balance(Denars.pouch(character)));
     assertEquals(Optional.empty(), Denars.status("e"));
   }
+
+  @Test
+  void aDeadCharactersMoneyStaysFrozenWhenTheProviderGoesAway() {
+    String pouch = Denars.pouch(character);
+    Money.fund(pouch, 500);
+    identity.kill(character);
+    Bukkit.getServicesManager()
+        .unregister(net.tfminecraft.tlibs.character.CharacterIdentity.class, identity);
+    assertEquals(Result.REFUSED, Denars.transfer("spend", "pay", pouch, Denars.MINT, 100));
+    assertEquals(Result.APPLIED, Denars.transfer("wage", "wage", Denars.MINT, pouch, 100));
+    assertEquals(
+        Result.APPLIED, Denars.transfer("estate", "estate:heir", pouch, Denars.TAX_VOID, 100));
+    assertEquals(Result.APPLIED, Denars.transfer("fix", "staff:fix", pouch, Denars.MINT, 100));
+    assertEquals(400, Denars.balance(pouch));
+  }
+
+  @Test
+  void everyFacadeCallChecksTheThreadBeforeAnyLookupOrPolicy() throws Exception {
+    List<CharacterRef> asked = new ArrayList<>();
+    TaxPolicy policy =
+        (earner, gross) -> {
+          asked.add(earner);
+          return Optional.empty();
+        };
+    Bukkit.getServicesManager()
+        .register(TaxPolicy.class, policy, MockBukkit.createMockPlugin(), ServicePriority.High);
+    String pouch = Denars.pouch(character);
+    List<Runnable> calls =
+        List.of(
+            Denars::ready,
+            () -> Denars.active(player),
+            () -> Denars.balance(pouch),
+            () -> Denars.post("p", "r", List.of(new Leg(Denars.MINT, -1), new Leg(pouch, 1))),
+            () -> Denars.transfer("t", "r", Denars.MINT, pouch, 1),
+            () -> Denars.status("t"),
+            () -> Denars.taxFor(character, 100),
+            () -> Denars.earn("e", character, pouch, 100, true),
+            () -> Denars.trade("s", "shop", Denars.MINT, character, pouch, 100, true));
+    for (Runnable call : calls) {
+      java.util.concurrent.atomic.AtomicReference<Throwable> thrown =
+          new java.util.concurrent.atomic.AtomicReference<>();
+      Thread worker =
+          new Thread(
+              () -> {
+                try {
+                  call.run();
+                } catch (Throwable e) {
+                  thrown.set(e);
+                }
+              });
+      worker.start();
+      worker.join();
+      assertInstanceOf(IllegalStateException.class, thrown.get());
+    }
+    assertTrue(asked.isEmpty());
+    assertEquals(Optional.empty(), Denars.status("e"));
+    assertEquals("guild:" + character.ownerId(), Denars.guild(character.ownerId()));
+  }
 }

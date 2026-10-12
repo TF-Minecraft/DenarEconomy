@@ -38,7 +38,7 @@ public class DenarEconomy extends JavaPlugin {
 		createFolders();
 		createConfigs();
 		loadConfigs();
-		ledger = Ledger.open(new File(getDataFolder(), "ledger.db"), getLogger(), AccountIds::deadCharacter);
+		ledger = Ledger.open(new File(getDataFolder(), "ledger.db"), getLogger(), AccountIds::frozen);
 		LegacyMigration migration = new LegacyMigration(ledger, getDataFolder(), getLogger());
 		migration.importFiles();
 		registerListeners();

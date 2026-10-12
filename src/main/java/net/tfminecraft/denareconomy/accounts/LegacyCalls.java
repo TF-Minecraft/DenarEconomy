@@ -1,8 +1,11 @@
 package net.tfminecraft.denareconomy.accounts;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -49,6 +52,19 @@ public final class LegacyCalls {
 		}
 	}
 
+	/** Whole cents of a denar amount, or empty when it is not finite or does not fit. */
+	public static OptionalLong cents(double amount) {
+		if (!Double.isFinite(amount)) {
+			return OptionalLong.empty();
+		}
+		try {
+			return OptionalLong.of(BigDecimal.valueOf(amount).setScale(2, RoundingMode.HALF_UP)
+					.unscaledValue().longValueExact());
+		} catch (ArithmeticException e) {
+			return OptionalLong.empty();
+		}
+	}
+
 	/** Signed change from the mint. Returns whether it was applied. */
 	public static boolean apply(UUID playerId, Accounts account, double amount, String method) {
 		Optional<CharacterRef> character = character(playerId);
@@ -56,7 +72,7 @@ public final class LegacyCalls {
 			refused(method);
 			return false;
 		}
-		long cents = Math.round(amount * 100.0);
+		long cents = cents(amount).orElse(0);
 		if (cents == 0) {
 			return false;
 		}

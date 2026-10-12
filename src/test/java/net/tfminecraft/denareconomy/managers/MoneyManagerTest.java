@@ -328,9 +328,12 @@ class MoneyManagerTest {
           new net.tfminecraft.tlibs.character.CharacterInfo(
               character, "Alex", net.tfminecraft.tlibs.character.CharacterStatus.ALIVE, null,
               Set.of(), 0, null));
+      Item drop = mock(Item.class);
+      doReturn(drop).when(money).spawnMoney(any(), any(), any(), anyBoolean());
       money.onPlayerDeath(event);
       assertEquals(0, pouch());
-      verify(scheduler).runTaskLater(eq(DenarEconomy.plugin), any(Runnable.class), eq(0L));
+      verify(money).spawnMoney(isNull(), any(), any(), eq(false));
+      verifyNoInteractions(scheduler);
       money.onPlayerDeath(event);
       verify(money, times(2)).amountToItems(5);
     }
@@ -493,6 +496,18 @@ class MoneyManagerTest {
     verify(conflicting).remove();
     assertEquals(101, pouch());
 
+    // Refused for one character, then conflicting for another: nobody was paid, so it stays.
+    fund(Long.MAX_VALUE - 101);
+    Item refused = coinEntity(stack);
+    money.pickupCoin(new EntityPickupItemEvent(player, refused, 0));
+    assertEquals(Optional.of(Result.REFUSED), Denars.status("coin:" + refused.getUniqueId()));
+    CharacterRef other = identity.character(id);
+    identity.start(player, other);
+    money.pickupCoin(new EntityPickupItemEvent(player, refused, 0));
+    verify(refused, never()).remove();
+    assertEquals(0, Denars.balance(Denars.pouch(other)));
+    identity.start(player, character);
+
     // A worthless coin is removed without a posting.
     ItemStack worthless = new ItemStack(Material.GOLD_NUGGET, 1);
     ItemMeta meta = worthless.getItemMeta();
@@ -553,11 +568,14 @@ class MoneyManagerTest {
     money.toPouch(player);
     messages.verify(() -> MessageLoader.send(player, "errors.no-character"));
     identity.start(player, character);
+    List<Long> pouchWhenSaved = new ArrayList<>();
+    doAnswer(invocation -> pouchWhenSaved.add(pouch())).when(player).saveData();
     money.toPouch(player);
     assertEquals(450, pouch());
     var order = inOrder(inventory, player);
     order.verify(inventory).setItemInMainHand(null);
     order.verify(player).saveData();
+    assertEquals(List.of(0L), pouchWhenSaved, "The emptied hand is saved before the credit");
     verify(player).playSound(player, Sound.BLOCK_NOTE_BLOCK_CHIME, 1f, 1f);
     messages.verify(() -> MessageLoader.send(player, "money.earned", "amount", new BigDecimal("4.50")));
 
@@ -567,10 +585,13 @@ class MoneyManagerTest {
     money.toPouch(player);
     assertEquals(480, pouch());
 
-    // A credit the pouch cannot hold leaves the coins in hand.
+    // A credit the pouch cannot hold puts the coins back in hand.
     fund(Long.MAX_VALUE - 480);
     money.toPouch(player);
-    verify(inventory, times(2)).setItemInMainHand(null);
+    verify(inventory, times(3)).setItemInMainHand(null);
+    verify(inventory).setItemInMainHand(face);
+    verify(player, times(4)).saveData();
+    assertEquals(Long.MAX_VALUE, pouch());
     messages.verify(() -> MessageLoader.send(player, "errors.ledger-unavailable"));
   }
 

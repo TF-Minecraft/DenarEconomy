@@ -142,6 +142,25 @@ class LegacyCallsTest {
   }
 
   @Test
+  void amountsThatAreNotFiniteOrDoNotFitAreRefusedBeforeConversion() {
+    for (double amount :
+        new double[] {
+          Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, Double.NaN, 1e300, -1e300
+        }) {
+      assertFalse(OfflineModifier.apply(alex.getUniqueId(), Accounts.POUCH, amount));
+      money.addMoneyToAccount(alex.getUniqueId().toString(), amount, false, false, Accounts.BANK);
+      assertEquals(0, money.doTaxes("Alex", amount));
+    }
+    assertEquals(0, pouch());
+    assertEquals(0, bank());
+    assertEquals(0, Denars.balance(Denars.MINT));
+    assertEquals(java.util.OptionalLong.of(1235), LegacyCalls.cents(12.345));
+    assertEquals(java.util.OptionalLong.of(-1235), LegacyCalls.cents(-12.345));
+    assertTrue(LegacyCalls.cents(9.3e16).isEmpty());
+    messages.verifyNoInteractions();
+  }
+
+  @Test
   void snapshotsShowTheCurrentCharacterAndCannotBeChanged() {
     Money.fund(Denars.pouch(character), 125);
     Money.fund(Denars.bank(character), 300);

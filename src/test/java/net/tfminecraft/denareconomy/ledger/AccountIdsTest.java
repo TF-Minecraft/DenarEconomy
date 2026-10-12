@@ -4,7 +4,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.UUID;
 import net.tfminecraft.denareconomy.testing.FakeIdentity;
+import net.tfminecraft.tlibs.character.CharacterIdentity;
 import net.tfminecraft.tlibs.character.CharacterRef;
+import org.bukkit.Bukkit;
 import org.junit.jupiter.api.Test;
 import org.mockbukkit.mockbukkit.MockBukkit;
 
@@ -67,19 +69,22 @@ class AccountIdsTest {
   }
 
   @Test
-  void onlyADeadCharactersAccountsAreFrozen() {
+  void characterAccountsAreFrozenUnlessTheCharacterIsKnownToBeAlive() {
     MockBukkit.mock();
     try {
       FakeIdentity identity = FakeIdentity.register();
       CharacterRef living = identity.character(UUID.randomUUID());
       CharacterRef dead = identity.character(UUID.randomUUID());
       identity.kill(dead);
-      assertTrue(AccountIds.deadCharacter(AccountIds.pouch(dead.characterId())));
-      assertTrue(AccountIds.deadCharacter(AccountIds.bank(dead.characterId())));
-      assertFalse(AccountIds.deadCharacter(AccountIds.pouch(living.characterId())));
-      assertFalse(AccountIds.deadCharacter(AccountIds.pouch(UUID.randomUUID())));
-      assertFalse(AccountIds.deadCharacter(AccountIds.legacyPouch(dead.ownerId())));
-      assertFalse(AccountIds.deadCharacter(AccountIds.MINT));
+      assertTrue(AccountIds.frozen(AccountIds.pouch(dead.characterId())));
+      assertTrue(AccountIds.frozen(AccountIds.bank(dead.characterId())));
+      assertFalse(AccountIds.frozen(AccountIds.pouch(living.characterId())));
+      assertTrue(AccountIds.frozen(AccountIds.pouch(UUID.randomUUID())), "Unknown character");
+      assertFalse(AccountIds.frozen(AccountIds.legacyPouch(dead.ownerId())));
+      assertFalse(AccountIds.frozen(AccountIds.MINT));
+      Bukkit.getServicesManager().unregister(CharacterIdentity.class, identity);
+      assertTrue(AccountIds.frozen(AccountIds.pouch(living.characterId())), "No provider");
+      assertFalse(AccountIds.frozen(AccountIds.guild(UUID.randomUUID())));
     } finally {
       MockBukkit.unmock();
     }

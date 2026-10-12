@@ -249,7 +249,7 @@ public class MoneyManager implements Listener{
 			LegacyCalls.refused("MoneyManager.doTaxes");
 			return 0.0;
 		}
-		return Denars.taxFor(character.get(), Math.round(amount * 100.0)) / 100.0;
+		return Denars.taxFor(character.get(), LegacyCalls.cents(amount).orElse(0)) / 100.0;
 	}
 	
 	/** @deprecated Credits the player's current character's pouch. Use {@code Denars.earn}. */
@@ -296,7 +296,7 @@ public class MoneyManager implements Listener{
 			LegacyCalls.refused("MoneyManager.addMoneyToAccount");
 			return;
 		}
-		long cents = Math.round(amount * 100.0);
+		long cents = LegacyCalls.cents(amount).orElse(0);
 		if (cents <= 0) return;
 		earn(Bukkit.getPlayer(playerId), character.get(), once("api"),
 				LegacyCalls.account(character.get(), a), cents, silent, taxable);
@@ -431,79 +431,70 @@ public class MoneyManager implements Listener{
 		dropItems(p, loc, amount, amountToItems(amount), null);
 	}
 
-	/** {@code sender} marks the paying character, whose own pickup is not taxed. */
+	/**
+	 * Spawns every coin in this tick, so money debited for them is never left waiting on a
+	 * scheduled task that a shutdown could cancel. {@code sender} marks the paying character,
+	 * whose own pickup is not taxed.
+	 */
 	private void dropItems(Player p, Location loc, double amount, List<ItemStack> items, UUID sender) {
 		final Vector launchVector = new Vector(
 			(Math.random() - 0.5) * 0.2, // small horizontal motion (left/right)
 			0.2 + Math.random() * 0.1,   // slight upward motion
 			(Math.random() - 0.5) * 0.2  // small horizontal motion (forward/back)
 		);
-	    if (items.isEmpty()) return;
-
-	    boolean[] named = {false}; // Use array to allow modification in inner class
-	    final UUID[] idHolder = new UUID[1];
-	    final ItemStack[] firstItemHolder = new ItemStack[1];
+	    UUID firstId = null;
+	    ItemStack firstStack = null;
 
 	    for (int i = 0; i < items.size(); i++) {
-	        final ItemStack original = items.get(i);
-	        final int index = i;
+	        ItemStack item = items.get(i).clone(); // Clone to avoid shared meta issues
+	        ItemMeta m = item.getItemMeta();
+	        if(sender != null) {
+	            NamespacedKey senderKey = new NamespacedKey(DenarEconomy.plugin, "sender");
+	            m.getPersistentDataContainer().set(senderKey, PersistentDataType.STRING, sender.toString());
+	        }
 
-	        new BukkitRunnable() {
-	            @Override
-	            public void run() {
-	                ItemStack item = original.clone(); // Clone to avoid shared meta issues
-	                ItemMeta m = item.getItemMeta();
-					if(sender != null) {
-						NamespacedKey senderKey = new NamespacedKey(DenarEconomy.plugin, "sender");
-	                	m.getPersistentDataContainer().set(senderKey, PersistentDataType.STRING, sender.toString());
-					}
-	                
+	        NamespacedKey valueKey = new NamespacedKey(DenarEconomy.plugin, "customValue");
+	        // World and death drops are income. A hopper can move them into an inventory,
+	        // so they must not be redeemed with /deco topouch.
+	        if (p == null) {
+	            m.getPersistentDataContainer().set(
+	                    new NamespacedKey(DenarEconomy.plugin, "worldPayout"),
+	                    PersistentDataType.BYTE, (byte) 1);
+	        }
 
-	                NamespacedKey valueKey = new NamespacedKey(DenarEconomy.plugin, "customValue");
-	                // World and death drops are income. A hopper can move them into an inventory,
-	                // so they must not be redeemed with /deco topouch.
-	                if (p == null) {
-	                    m.getPersistentDataContainer().set(
-	                            new NamespacedKey(DenarEconomy.plugin, "worldPayout"),
-	                            PersistentDataType.BYTE, (byte) 1);
-	                }
+	        if (i == 0) {
+	            m.getPersistentDataContainer().set(valueKey, PersistentDataType.DOUBLE, amount);
+	            item.setItemMeta(m);
+	            Item first = spawnMoney(p, loc, item, false);
+	            if(p == null) first.setVelocity(launchVector);
+	            firstId = first.getUniqueId();
+	            firstStack = first.getItemStack();
+	            continue;
+	        }
+	        if (firstId == null) {
+	            if(p != null) MessageLoader.send(p, "errors.item-chain-broken");
+	            return;
+	        }
 
-	                if (!named[0]) {
-	                    named[0] = true;
-	                    m.getPersistentDataContainer().set(valueKey, PersistentDataType.DOUBLE, amount);
-	                    item.setItemMeta(m);
-	                    Item first = spawnMoney(p, loc, item, false);
-						if(p == null) first.setVelocity(launchVector);
-	                    idHolder[0] = first.getUniqueId();
-	                    firstItemHolder[0] = first.getItemStack();
-	                } else {
-	                    if (idHolder[0] == null) {
-	                        if(p != null) MessageLoader.send(p, "errors.item-chain-broken");
-	                        return;
-	                    }
+	        m.getPersistentDataContainer().set(valueKey, PersistentDataType.DOUBLE, 0.0);
+	        NamespacedKey chain = new NamespacedKey(DenarEconomy.plugin, "chained");
+	        m.getPersistentDataContainer().set(chain, PersistentDataType.STRING, firstId.toString());
+	        item.setItemMeta(m);
 
-	                    m.getPersistentDataContainer().set(valueKey, PersistentDataType.DOUBLE, 0.0);
-	                    NamespacedKey chain = new NamespacedKey(DenarEconomy.plugin, "chained");
-	                    m.getPersistentDataContainer().set(chain, PersistentDataType.STRING, idHolder[0].toString());
-	                    item.setItemMeta(m);
+	        Item newItem = spawnMoney(p, loc, item, true);
+	        if(p == null) newItem.setVelocity(launchVector);
 
-	                    Item newItem = spawnMoney(p, loc, item, true);
-						if(p == null) newItem.setVelocity(launchVector);
-
-	                    if (firstItemHolder[0] != null) {
-	                        ItemMeta firstM = firstItemHolder[0].getItemMeta();
-	                        NamespacedKey chainTo = new NamespacedKey(DenarEconomy.plugin, "chained_to");
-	                        String current = firstM.getPersistentDataContainer().get(chainTo, PersistentDataType.STRING);
-	                        if (current == null) {
-	                            firstM.getPersistentDataContainer().set(chainTo, PersistentDataType.STRING, newItem.getUniqueId().toString());
-	                        } else {
-	                            firstM.getPersistentDataContainer().set(chainTo, PersistentDataType.STRING, current + ";" + newItem.getUniqueId().toString());
-	                        }
-	                        firstItemHolder[0].setItemMeta(firstM);
-	                    }
-	                }
+	        if (firstStack != null) {
+	            ItemMeta firstM = firstStack.getItemMeta();
+	            NamespacedKey chainTo = new NamespacedKey(DenarEconomy.plugin, "chained_to");
+	            String current = firstM.getPersistentDataContainer().get(chainTo, PersistentDataType.STRING);
+	            if (current == null) {
+	                firstM.getPersistentDataContainer().set(chainTo, PersistentDataType.STRING, newItem.getUniqueId().toString());
+	            } else {
+	                firstM.getPersistentDataContainer().set(chainTo, PersistentDataType.STRING, current + ";" + newItem.getUniqueId().toString());
 	            }
-	        }.runTaskLater(DenarEconomy.plugin, index);
+	            firstStack.setItemMeta(firstM);
+	        }
 	    }
 	}
 	
@@ -599,14 +590,17 @@ public class MoneyManager implements Listener{
 		Optional<CharacterRef> character = holder(p);
 		if (character.isEmpty()) return;
 		CharacterRef ref = character.get();
+		// Take the coins and save the player before crediting. Like any item, the coins can still
+		// come back if an unclean shutdown rolls the player file back after the credit commits.
+		p.getInventory().setItemInMainHand(null);
+		p.saveData();
 		Result result = earn(p, ref, once("topouch"), Denars.pouch(ref), cents, false, false);
 		if (result != Result.APPLIED) {
+			p.getInventory().setItemInMainHand(held);
+			p.saveData();
 			MessageLoader.send(p, "errors.ledger-unavailable");
 			return;
 		}
-		p.getInventory().setItemInMainHand(null);
-		// The credit is already durable; save the emptied hand now so a crash cannot restore the coins.
-		p.saveData();
 		p.playSound(p, Sound.BLOCK_NOTE_BLOCK_CHIME, 1f, 1f);
 	}
 
@@ -677,8 +671,9 @@ public class MoneyManager implements Listener{
 	}
 
 	/**
-	 * Credits a picked-up coin as operation {@code coin:<item entity>}, so a coin that reappears
-	 * after a crash cannot be credited twice. The coin stays on the ground unless the posting applies.
+	 * Credits a picked-up coin as operation {@code coin:<item entity>}, so the same entity is never
+	 * credited twice. The coin stays on the ground unless the posting applies. Like any item, a coin
+	 * can still come back as a new entity if an unclean shutdown rolls the world back.
 	 */
 	private void collectCoin(Player p, Item entity, Coin c) {
 		ItemStack item = entity.getItemStack();
@@ -702,8 +697,11 @@ public class MoneyManager implements Listener{
 		Result result = cents > 0
 				? earn(p, ref, "coin:" + entity.getUniqueId(), Denars.pouch(ref), cents, silent, taxable)
 				: Result.APPLIED;
-		// CONFLICT: this coin was credited before with different tax, so it is already paid for.
-		if (result != Result.APPLIED && result != Result.CONFLICT) return;
+		// CONFLICT: this coin was posted before with other legs. Only a stored APPLIED proves it was paid.
+		if (result == Result.CONFLICT) {
+			result = Denars.status("coin:" + entity.getUniqueId()).orElse(Result.UNAVAILABLE);
+		}
+		if (result != Result.APPLIED) return;
 		entity.remove();
 		String chained = data.get(new NamespacedKey(DenarEconomy.plugin, "chained_to"), PersistentDataType.STRING);
 		if (chained != null) {

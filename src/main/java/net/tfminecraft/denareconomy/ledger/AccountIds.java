@@ -74,10 +74,14 @@ public final class AccountIds {
 		return id.startsWith("server:") || id.startsWith("guild:");
 	}
 
-	/** Whether this is a dead character's account, which refuses debits outside staff and estates. */
-	public static boolean deadCharacter(String id) {
+	/**
+	 * Whether this is a character account whose debits are refused outside staff and estates: the
+	 * character is not alive, or its status cannot be read because the character is unknown or
+	 * no identity provider is registered.
+	 */
+	public static boolean frozen(String id) {
 		String character = parse(id).character();
 		return character != null && Characters.info(UUID.fromString(character))
-				.map(info -> info.status() == CharacterStatus.DEAD).orElse(false);
+				.map(info -> info.status() != CharacterStatus.ALIVE).orElse(true);
 	}
 }

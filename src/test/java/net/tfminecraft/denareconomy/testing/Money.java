@@ -21,7 +21,7 @@ public final class Money {
         Ledger.open(
             folder.resolve("ledger.db").toFile(),
             Logger.getLogger("DenarEconomyTest"),
-            AccountIds::deadCharacter);
+            AccountIds::frozen);
     DenarEconomy.setLedger(ledger);
     return ledger;
   }

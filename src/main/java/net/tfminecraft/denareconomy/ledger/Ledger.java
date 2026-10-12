@@ -94,7 +94,7 @@ public final class Ledger {
 
 	/** A ledger that refuses everything, for use before the plugin enables. */
 	public static Ledger unavailable() {
-		return new Ledger(Logger.getLogger("DenarEconomy"), AccountIds::deadCharacter);
+		return new Ledger(Logger.getLogger("DenarEconomy"), AccountIds::frozen);
 	}
 
 	public boolean isOpen() {
@@ -326,7 +326,8 @@ public final class Ledger {
 		}
 	}
 
-	static void requireMainThread() {
+	/** @throws IllegalStateException off the server's main thread */
+	public static void requireMainThread() {
 		if (!Bukkit.isPrimaryThread()) {
 			throw new IllegalStateException("The DenarEconomy ledger must be used on the main thread");
 		}

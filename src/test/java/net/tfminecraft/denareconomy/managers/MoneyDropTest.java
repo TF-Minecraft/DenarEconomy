@@ -107,16 +107,14 @@ class MoneyDropTest {
     assertEquals(500, pouch());
 
     doReturn(List.of(new ItemStack(Material.GOLD_NUGGET))).when(money).amountToItems(5);
-    var tasks = schedule(() -> money.onPlayerDeath(event));
+    assertTrue(schedule(() -> money.onPlayerDeath(event)).isEmpty());
     assertEquals(0, pouch());
     assertEquals(0, Denars.balance(Denars.MINT));
-    assertEquals(1, tasks.size());
-    tasks.getFirst().runnable().run();
     assertEquals(5.0, metadata(spawned.getFirst(), "customValue", PersistentDataType.DOUBLE));
   }
 
   @Test
-  void paymentPreparesCoinsOnceThenDebitsAndSchedulesThoseExactItems() {
+  void paymentPreparesCoinsOnceThenDebitsAndSpawnsThoseExactItems() {
     Money.fund(Denars.pouch(character), 500);
     ItemStack prepared = new ItemStack(Material.GOLD_NUGGET, 3);
     doAnswer(
@@ -127,17 +125,29 @@ class MoneyDropTest {
         .when(money)
         .amountToItems(3);
 
-    var tasks = schedule(() -> money.pay(player, 300));
+    assertTrue(schedule(() -> money.pay(player, 300)).isEmpty());
     assertEquals(200, pouch());
     verify(money).amountToItems(3);
-    assertEquals(1, tasks.size());
-    assertTrue(spawned.isEmpty());
-    tasks.getFirst().runnable().run();
     assertEquals(1, spawned.size());
     assertEquals(Material.GOLD_NUGGET, spawned.getFirst().getType());
     assertEquals(3, spawned.getFirst().getAmount());
     assertEquals(3.0, metadata(spawned.getFirst(), "customValue", PersistentDataType.DOUBLE));
     assertTrue(prepared.getItemMeta().getPersistentDataContainer().isEmpty());
+  }
+
+  @Test
+  void aShutdownRightAfterPayingLeavesNoDebitedMoneyUndelivered() {
+    Money.fund(Denars.pouch(character), 500);
+    doReturn(List.of(new ItemStack(Material.GOLD_NUGGET, 2), new ItemStack(Material.IRON_NUGGET)))
+        .when(money)
+        .amountToItems(2.5);
+    money.pay(player, 250);
+    // Shut down at once: every debited cent is already in the world.
+    MockBukkit.getMock().getScheduler().shutdown();
+    assertEquals(250, pouch());
+    assertEquals(2, spawned.size());
+    assertEquals(2.5, metadata(spawned.getFirst(), "customValue", PersistentDataType.DOUBLE));
+    assertEquals(-250, Denars.balance(Denars.MINT));
   }
 
   @Test
@@ -152,13 +162,12 @@ class MoneyDropTest {
     doReturn(List.of(new ItemStack(Material.GOLD_NUGGET), new ItemStack(Material.IRON_NUGGET)))
         .when(money)
         .amountToItems(2);
-    var tasks = schedule(() -> money.dropItems(player, null, 2));
     // Fault injection: Bukkit promises a stack, but retain the existing adapter recovery.
     Item first = mock(Item.class);
     UUID firstId = UUID.randomUUID();
     when(first.getUniqueId()).thenReturn(firstId);
     doReturn(first).when(money).spawnMoney(eq(player), isNull(), any(), eq(false));
-    tasks.forEach(task -> task.runnable().run());
+    money.dropItems(player, null, 2);
 
     assertEquals(1, spawned.size());
     assertEquals(0.0, metadata(spawned.getFirst(), "customValue", PersistentDataType.DOUBLE));
@@ -176,14 +185,13 @@ class MoneyDropTest {
     doReturn(List.of(new ItemStack(Material.GOLD_NUGGET), new ItemStack(Material.IRON_NUGGET)))
         .when(money)
         .amountToItems(2);
-    var tasks = schedule(() -> money.dropItems(sender, origin, 2));
     Item first = mock(Item.class);
     ItemStack firstStack = new ItemStack(Material.GOLD_NUGGET);
     when(first.getItemStack()).thenReturn(firstStack);
     // A broken adapter returning a null UUID must never spawn unlinked follow-up money.
     doReturn(first).when(money).spawnMoney(eq(sender), eq(origin), any(), eq(false));
     try (var messages = mockStatic(MessageLoader.class)) {
-      tasks.forEach(task -> task.runnable().run());
+      money.dropItems(sender, origin, 2);
       verify(money, never()).spawnMoney(any(), any(), any(), eq(true));
       assertTrue(spawned.isEmpty());
       assertTrue(firstStack.getItemMeta().getPersistentDataContainer().isEmpty());
@@ -196,7 +204,7 @@ class MoneyDropTest {
   }
 
   @Test
-  void playerPayoutIsStaggeredAndOnlyFirstCoinCarriesCombinedValue() {
+  void playerPayoutSpawnsInTheSameTickAndOnlyFirstCoinCarriesCombinedValue() {
     List<ItemStack> originals =
         List.of(
             new ItemStack(Material.GOLD_NUGGET, 3),
@@ -204,11 +212,9 @@ class MoneyDropTest {
             new ItemStack(Material.COPPER_INGOT));
     doReturn(originals).when(money).amountToItems(12.34);
     Money.fund(Denars.pouch(character), 2000);
-    var tasks = schedule(() -> money.pay(player, 1234));
+    // Nothing is left to a scheduled task, so a shutdown straight after cannot strand the debit.
+    assertTrue(schedule(() -> money.pay(player, 1234)).isEmpty());
     assertEquals(766, pouch());
-    assertEquals(List.of(0L, 1L, 2L), tasks.stream().map(Scheduled::delay).toList());
-    assertTrue(spawned.isEmpty(), "Entities should appear only when their scheduled task runs");
-    tasks.forEach(task -> task.runnable().run());
     assertEquals(3, spawned.size());
     assertEquals(12.34, metadata(spawned.getFirst(), "customValue", PersistentDataType.DOUBLE));
     assertNull(metadata(spawned.getFirst(), "silent", PersistentDataType.INTEGER));
@@ -240,7 +246,7 @@ class MoneyDropTest {
     doReturn(List.of(new ItemStack(Material.GOLD_NUGGET), new ItemStack(Material.IRON_NUGGET)))
         .when(money)
         .amountToItems(2);
-    schedule(() -> money.dropItems(null, location, 2)).forEach(task -> task.runnable().run());
+    assertTrue(schedule(() -> money.dropItems(null, location, 2)).isEmpty());
     assertEquals(2, entities.size());
     ArgumentCaptor<Vector> velocity = ArgumentCaptor.forClass(Vector.class);
     verify(entities.getFirst()).setVelocity(velocity.capture());

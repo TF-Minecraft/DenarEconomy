@@ -11,6 +11,7 @@ import org.bukkit.entity.Player;
 import net.tfminecraft.denareconomy.DenarEconomy;
 import net.tfminecraft.denareconomy.event.PlayerEarnMoneyEvent;
 import net.tfminecraft.denareconomy.ledger.AccountIds;
+import net.tfminecraft.denareconomy.ledger.Ledger;
 import net.tfminecraft.tlibs.character.CharacterRef;
 import net.tfminecraft.tlibs.character.CharacterSession;
 import net.tfminecraft.tlibs.character.Characters;
@@ -26,7 +27,8 @@ import net.tfminecraft.tlibs.character.Characters;
  * guild treasuries and system accounts may. A dead character's accounts refuse debits unless the
  * reason starts with {@code staff:} or {@code estate:}.
  *
- * <p>Main thread only; every method throws {@link IllegalStateException} elsewhere.
+ * <p>Main thread only: every method except the account ID helpers throws
+ * {@link IllegalStateException} elsewhere, before any lookup or tax policy runs.
  */
 public final class Denars {
 	public static final String MINT = AccountIds.MINT;
@@ -37,11 +39,13 @@ public final class Denars {
 
 	/** Whether the ledger is open and characters can be resolved. */
 	public static boolean ready() {
+		Ledger.requireMainThread();
 		return DenarEconomy.getLedger().isOpen() && Characters.available();
 	}
 
 	/** The character the player is playing now, or empty when none is active. */
 	public static Optional<CharacterRef> active(Player player) {
+		Ledger.requireMainThread();
 		return Characters.currentSession(player).map(CharacterSession::ref);
 	}
 
@@ -65,27 +69,32 @@ public final class Denars {
 
 	/** Balance in cents; zero when the ledger is unavailable. */
 	public static long balance(String account) {
+		Ledger.requireMainThread();
 		return DenarEconomy.getLedger().balance(account);
 	}
 
 	/** Posts legs that sum to zero, all or nothing. */
 	public static Result post(String opId, String reason, List<Leg> legs) {
+		Ledger.requireMainThread();
 		return DenarEconomy.getLedger().post(opId, reason, legs);
 	}
 
 	/** Moves a positive amount between two accounts. */
 	public static Result transfer(String opId, String reason, String from, String to, long cents) {
+		Ledger.requireMainThread();
 		requirePositive(cents);
 		return post(opId, reason, List.of(new Leg(from, -cents), new Leg(to, cents)));
 	}
 
 	/** The stored result of an operation, or empty if it was never posted. */
 	public static Optional<Result> status(String opId) {
+		Ledger.requireMainThread();
 		return DenarEconomy.getLedger().status(opId);
 	}
 
 	/** The tax on this earning under the registered {@link TaxPolicy}; zero without one. */
 	public static long taxFor(CharacterRef earner, long grossCents) {
+		Ledger.requireMainThread();
 		return taxLeg(earner, grossCents).map(TaxLeg::cents).orElse(0L);
 	}
 
@@ -94,12 +103,14 @@ public final class Denars {
 	 * policy's holding account in the same posting.
 	 */
 	public static Result earn(String opId, CharacterRef earner, String account, long cents, boolean taxable) {
+		Ledger.requireMainThread();
 		return pay(opId, "earn", MINT, earner, account, cents, taxable);
 	}
 
 	/** A sale: the buyer pays the seller, less tax on the seller's earning when taxable. */
 	public static Result trade(String opId, String reason, String buyerAccount, CharacterRef seller,
 			String sellerAccount, long cents, boolean taxable) {
+		Ledger.requireMainThread();
 		return pay(opId, reason, buyerAccount, seller, sellerAccount, cents, taxable);
 	}
 
