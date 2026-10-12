@@ -15,7 +15,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.proc>full</maven.compiler.proc>
-        <tlibs.version>2.0.0</tlibs.version>
+        <tlibs.version>2.4.0</tlibs.version>
     </properties>
 
     <dependencies>
@@ -78,6 +78,13 @@
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Paper supplies the SQLite driver at runtime. -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.49.1.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -23,8 +23,10 @@ errors:
   invalid-count: "%prefix%&cAmount must be a whole number of coins."
   coins-unavailable: "%prefix%&cThat sum cannot be counted out in coin. Your pouch has not been charged."
   give-usage: "%prefix%&cUsage: /deco give <player> <amount> [bank|pouch]"
-  unknown-player: "%prefix%&cNo denar account is known for %player%."
+  unknown-player: "%prefix%&c%player% is not online playing a character."
   give-failed: "%prefix%&cCould not pay %player%. Their balance has not changed."
+  no-character: "%prefix%#a33d1dYou carry no purse until you take up a character."
+  ledger-unavailable: "%prefix%&cThe bankers' ledger is closed. Nothing has changed."
 
 balance:
   pouch: "#3ce8c9Current Pouch Balance: #b39122%amount%#dbaf1dd"
@@ -51,6 +53,20 @@ bank:
 give:
   sent: "%prefix%&aGave #b39122%amount%#dbaf1dd &ato %player%'s %account%."
   received: "#dbaf1d+#b39122%amount%#dbaf1dd #3ce8c9added to your %account%."
+
+history:
+  header: "&e====== &6[Ledger of %player%] &7last %count% &e======"
+  entry: "&7%time% &e%reason%&7: %changes%"
+  change: "%account% #b39122%amount%#dbaf1dd"
+
+legacy:
+  header: "&e====== &6[Unclaimed legacy money] &7%count% accounts &e======"
+  entry: "&e%name% &7%account%: pouch #b39122%pouch%#dbaf1dd&7, bank #b39122%bank%#dbaf1dd"
+  usage: "%prefix%&cUsage: /deco legacy [assign <account uuid> <character uuid>]"
+  not-owner: "%prefix%&cCharacter %character% is not a character of account %account%."
+  nothing: "%prefix%&cAccount %account% has no unclaimed legacy money."
+  failed: "%prefix%&cCould not assign the legacy money of %account% (%result%). Nothing has changed."
+  assigned: "%prefix%&aMoved the legacy money of %account% to character %character%."
 
 money:
   earned: "#dbaf1d+#b39122%amount%#dbaf1dd"

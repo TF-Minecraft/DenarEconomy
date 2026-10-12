@@ -10,21 +10,18 @@ import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 
-import net.tfminecraft.denareconomy.DenarEconomy;
-import net.tfminecraft.denareconomy.data.PlayerData;
 import net.tfminecraft.denareconomy.database.Database;
 import net.tfminecraft.denareconomy.enums.Accounts;
-import net.tfminecraft.denareconomy.managers.PlayerManager;
 
 /**
- * A balance change other plugins can apply without asking whether the player is logged in.
- * The name is resolved here. A withdrawal that the account cannot cover is refused.
+ * Player names to account IDs, and the name-based balance calls from before characters had their
+ * own money. Those calls now act only on an online player's current character; anyone else is
+ * refused and logged. Use {@code net.tfminecraft.denareconomy.api.Denars} instead.
  */
 public final class OfflineModifier {
 	private static final File NAMES = new File("plugins/DenarEconomy/Data/player-names.json");
 	private static final File USER_CACHE = new File("usercache.json");
 
-	private static AccountBook book;
 	private static PlayerNames names;
 
 	private OfflineModifier() {
@@ -35,53 +32,33 @@ public final class OfflineModifier {
 		names().load();
 	}
 
-	/**
-	 * Move {@code amount} denars on this account. Positive deposits, negative withdraws.
-	 * Returns false when the player is unknown or the withdrawal would pass below zero.
-	 */
+	/** Signed change on the online player's current character. Returns false for anyone else. */
+	@Deprecated
 	public static boolean apply(String playerName, Accounts account, double amount) {
-		UUID id = playerId(playerName);
-		if (id == null) {
-			return false;
-		}
-		return apply(id, account, amount);
+		return apply(playerId(playerName), account, amount);
 	}
 
-	/**
-	 * Move {@code amount} denars on this account. Positive deposits, negative withdraws.
-	 * Returns false when the withdrawal would pass below zero.
-	 */
+	/** Signed change on the online player's current character. Returns false for anyone else. */
+	@Deprecated
 	public static boolean apply(UUID playerId, Accounts account, double amount) {
-		if (playerId == null || account == null) {
-			return false;
-		}
-		return book().apply(playerId, account, amount, false);
+		return LegacyCalls.apply(playerId, account, amount, "OfflineModifier.apply");
 	}
 
-	/**
-	 * Legacy write used by {@code MoneyManager.changeBal}. A withdrawal may pass below zero
-	 * because those callers already decided the amount.
-	 */
+	/** Signed change on the online player's current character; ignored for anyone else. */
+	@Deprecated
 	public static void change(UUID playerId, Accounts account, double amount) {
-		if (playerId == null || account == null || amount == 0.0) {
-			return;
-		}
-		book().apply(playerId, account, amount, true);
+		LegacyCalls.apply(playerId, account, amount, "OfflineModifier.change");
 	}
 
+	@Deprecated
 	public static double balance(String playerName, Accounts account) {
-		UUID id = playerId(playerName);
-		if (id == null) {
-			return 0.0;
-		}
-		return balance(id, account);
+		return balance(playerId(playerName), account);
 	}
 
+	/** The online player's current character's balance, or zero for anyone else. */
+	@Deprecated
 	public static double balance(UUID playerId, Accounts account) {
-		if (playerId == null || account == null) {
-			return 0.0;
-		}
-		return book().balance(playerId, account);
+		return LegacyCalls.balance(playerId, account, "OfflineModifier.balance");
 	}
 
 	/** The account id for this name, online or offline, or null when deco does not know them. */
@@ -97,70 +74,12 @@ public final class OfflineModifier {
 		names().remember(playerName, playerId);
 	}
 
-	private static AccountBook book() {
-		if (book == null) {
-			book = new AccountBook(new LiveStore());
-		}
-		return book;
-	}
-
 	private static PlayerNames names() {
 		if (names == null) {
 			names = new PlayerNames(new LiveSources(), NAMES);
 			names.load();
 		}
 		return names;
-	}
-
-	private static final class LiveStore implements AccountBook.Store {
-		@Override
-		public PlayerData live(UUID id) {
-			PlayerManager manager = DenarEconomy.getPlayerManager();
-			if (manager == null || id == null || !manager.exists(id)) {
-				return null;
-			}
-			return manager.peek(id);
-		}
-
-		@Override
-		public boolean online(UUID id) {
-			if (id == null || Bukkit.getServer() == null) {
-				return false;
-			}
-			Player player = Bukkit.getPlayer(id);
-			return player != null && player.isOnline();
-		}
-
-		@Override
-		public PlayerData load(UUID id) {
-			if (id == null || !Database.hasPlayerData(id)) {
-				return null;
-			}
-			return Database.loadPlayerData(id);
-		}
-
-		@Override
-		public void save(PlayerData data) {
-			if (data != null) {
-				Database.savePlayerData(data);
-			}
-		}
-
-		@Override
-		public void keep(PlayerData data) {
-			PlayerManager manager = DenarEconomy.getPlayerManager();
-			if (manager != null) {
-				manager.keep(data);
-			}
-		}
-
-		@Override
-		public void drop(UUID id) {
-			PlayerManager manager = DenarEconomy.getPlayerManager();
-			if (manager != null) {
-				manager.drop(id);
-			}
-		}
 	}
 
 	private static final class LiveSources implements PlayerNames.Sources {
@@ -208,13 +127,6 @@ public final class OfflineModifier {
 
 		@Override
 		public boolean hasAccount(UUID id) {
-			if (id == null) {
-				return false;
-			}
-			PlayerManager manager = DenarEconomy.getPlayerManager();
-			if (manager != null && manager.exists(id)) {
-				return true;
-			}
 			return Database.hasPlayerData(id);
 		}
 	}

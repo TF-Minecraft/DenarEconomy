@@ -8,6 +8,9 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import net.tfminecraft.denareconomy.accounts.OfflineModifier;
+import net.tfminecraft.denareconomy.ledger.AccountIds;
+import net.tfminecraft.denareconomy.ledger.LegacyMigration;
+import net.tfminecraft.denareconomy.ledger.Ledger;
 import net.tfminecraft.denareconomy.loaders.CoinLoader;
 import net.tfminecraft.denareconomy.loaders.DropLoader;
 import net.tfminecraft.denareconomy.loaders.MessageLoader;
@@ -27,6 +30,7 @@ public class DenarEconomy extends JavaPlugin {
 	
 	private static final PlayerManager playerManager = new PlayerManager();
 	private static final MoneyManager moneyManager = new MoneyManager();
+	private static Ledger ledger = Ledger.unavailable();
 	
 	@Override
 	public void onEnable() {
@@ -34,12 +38,15 @@ public class DenarEconomy extends JavaPlugin {
 		createFolders();
 		createConfigs();
 		loadConfigs();
+		ledger = Ledger.open(new File(getDataFolder(), "ledger.db"), getLogger(), AccountIds::frozen);
+		LegacyMigration migration = new LegacyMigration(ledger, getDataFolder(), getLogger());
+		migration.importFiles();
 		registerListeners();
 		getCommand(commands.cmd1).setExecutor(commands);
 		getCommand(commands.cmd2).setExecutor(commands);
 		getCommand(commands.cmd1).setTabCompleter(commands);
 		getCommand(commands.cmd2).setTabCompleter(commands);
-		playerManager.start();
+		migration.start(this);
 		OfflineModifier.load();
 		for (Player p : Bukkit.getOnlinePlayers()) {
 			OfflineModifier.remember(p.getName(), p.getUniqueId());
@@ -48,7 +55,7 @@ public class DenarEconomy extends JavaPlugin {
 
 	@Override
 	public void onDisable(){
-		playerManager.saveAll();
+		ledger.close();
 		for (ArmorStand stand : moneyManager.getStandMap().values()) {
 			if (stand != null && !stand.isDead()) stand.remove();
 		}
@@ -75,8 +82,6 @@ public class DenarEconomy extends JavaPlugin {
 		if (!getDataFolder().exists()) getDataFolder().mkdir();
 		File subFolder = new File(getDataFolder(), "Data");
 		if(!subFolder.exists()) subFolder.mkdir();
-		subFolder = new File(getDataFolder(), "PlayerData");
-		if(!subFolder.exists()) subFolder.mkdir();
 	}
 	public void createConfigs() {
 		String[] files = {
@@ -98,5 +103,15 @@ public class DenarEconomy extends JavaPlugin {
 	}
 	public static MoneyManager getMoneyManager() {
 		return moneyManager;
+	}
+
+	/** The open ledger, or a closed one before enable and after disable. Use {@code Denars} instead. */
+	public static Ledger getLedger() {
+		return ledger;
+	}
+
+	/** Replaces the ledger. For the plugin's lifecycle and tests. */
+	public static void setLedger(Ledger replacement) {
+		ledger = replacement;
 	}
 }

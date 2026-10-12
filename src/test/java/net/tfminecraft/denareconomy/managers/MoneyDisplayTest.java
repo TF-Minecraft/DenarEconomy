@@ -8,7 +8,11 @@ import java.lang.reflect.Field;
 import java.util.*;
 import java.util.function.Consumer;
 import net.tfminecraft.denareconomy.DenarEconomy;
-import net.tfminecraft.denareconomy.data.PlayerData;
+import net.tfminecraft.denareconomy.testing.Money;
+import net.tfminecraft.denareconomy.api.Denars;
+import net.tfminecraft.tlibs.character.CharacterRef;
+import java.nio.file.Path;
+import org.junit.jupiter.api.io.TempDir;
 import net.tfminecraft.denareconomy.item.Coin;
 import net.tfminecraft.denareconomy.loaders.MessageLoader;
 import org.bukkit.*;
@@ -28,7 +32,8 @@ class MoneyDisplayTest {
   private MoneyManager money;
   private Player player;
   private UUID id;
-  private PlayerData data;
+  @TempDir Path folder;
+  private CharacterRef character;
   private ArmorStand stand;
   private World world;
   private BukkitScheduler scheduler;
@@ -46,9 +51,9 @@ class MoneyDisplayTest {
     id = UUID.randomUUID();
     when(player.getUniqueId()).thenReturn(id);
     when(player.isOnline()).thenReturn(true);
-    data = new PlayerData(id);
-    DenarEconomy.getPlayerManager().keep(data);
+    character = new CharacterRef(id, UUID.randomUUID());
     money = spy(new MoneyManager());
+    doReturn(Optional.of(character)).when(money).holder(player);
     world = mock(World.class);
     when(player.getWorld()).thenReturn(world);
     when(player.getLocation()).thenAnswer(invocation -> new Location(world, 1, 2, 3));
@@ -79,20 +84,22 @@ class MoneyDisplayTest {
             });
     bukkit = mockStatic(Bukkit.class);
     bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
+    bukkit.when(Bukkit::isPrimaryThread).thenReturn(true);
+    Money.open(folder);
     messages = mockStatic(MessageLoader.class);
   }
 
   @AfterEach
   void teardown() {
     messages.close();
+    Money.close();
     bukkit.close();
-    DenarEconomy.getPlayerManager().drop(id);
     DenarEconomy.plugin = previous;
   }
 
   @Test
   void displaysPouchAndWithdrawableInventoryCoinsAndConfiguresTemporaryHologram() {
-    data.getPouch().setBal(3);
+    Money.fund(Denars.pouch(character), 300);
     ItemStack air = stack(Material.AIR, 1);
     ItemStack ordinary = stack(Material.STONE, 1);
     ItemStack locked = stack(Material.IRON_NUGGET, 1);
@@ -130,6 +137,14 @@ class MoneyDisplayTest {
     when(stand.isDead()).thenReturn(true);
     follow.run();
     verify(stand, times(1)).teleport(any(Location.class));
+  }
+
+  @Test
+  void nothingIsShownWithoutACurrentCharacter() {
+    doReturn(Optional.empty()).when(money).holder(player);
+    money.showPouch(player);
+    verifyNoInteractions(world, scheduler);
+    messages.verifyNoInteractions();
   }
 
   @Test
