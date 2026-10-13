@@ -96,6 +96,10 @@ class DenarEconomyTest {
           plugin.getCommand("pouch").getExecutor(), plugin.getCommand("pouch").getTabCompleter());
       assertTrue(new File(plugin.getDataFolder(), "ledger.db").isFile());
       assertTrue(DenarEconomy.getLedger().isOpen());
+      assertInstanceOf(
+          net.tfminecraft.denareconomy.estate.MoneyEstates.class,
+          Bukkit.getServicesManager()
+              .load(net.tfminecraft.tlibs.character.estate.EstateParticipant.class));
       assertTrue(new File(plugin.getDataFolder(), "PlayerData.imported").isDirectory());
       assertEquals(250, Denars.balance(Denars.pouch(heir)));
       assertEquals(300, Denars.balance(Denars.bank(heir)));

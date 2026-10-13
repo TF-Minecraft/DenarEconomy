@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import net.tfminecraft.denareconomy.accounts.OfflineModifier;
+import net.tfminecraft.denareconomy.estate.EstateSupport;
 import net.tfminecraft.denareconomy.ledger.AccountIds;
 import net.tfminecraft.denareconomy.ledger.LegacyMigration;
 import net.tfminecraft.denareconomy.ledger.Ledger;
@@ -47,6 +48,7 @@ public class DenarEconomy extends JavaPlugin {
 		getCommand(commands.cmd1).setTabCompleter(commands);
 		getCommand(commands.cmd2).setTabCompleter(commands);
 		migration.start(this);
+		EstateSupport.start(this);
 		OfflineModifier.load();
 		for (Player p : Bukkit.getOnlinePlayers()) {
 			OfflineModifier.remember(p.getName(), p.getUniqueId());
