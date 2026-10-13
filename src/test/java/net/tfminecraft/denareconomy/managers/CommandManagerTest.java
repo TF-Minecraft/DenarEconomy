@@ -12,14 +12,17 @@ import java.util.logging.Logger;
 import net.tfminecraft.denareconomy.DenarEconomy;
 import net.tfminecraft.denareconomy.api.Denars;
 import net.tfminecraft.denareconomy.api.Leg;
+import net.tfminecraft.denareconomy.api.Result;
 import net.tfminecraft.denareconomy.event.PlayerBankPulseEvent;
 import net.tfminecraft.denareconomy.item.Coin;
 import net.tfminecraft.denareconomy.ledger.AccountIds;
+import net.tfminecraft.denareconomy.ledger.Ledger;
 import net.tfminecraft.denareconomy.loaders.CoinLoader;
 import net.tfminecraft.denareconomy.loaders.MessageLoader;
 import net.tfminecraft.denareconomy.testing.FakeIdentity;
 import net.tfminecraft.denareconomy.testing.Money;
 import net.tfminecraft.tlibs.character.CharacterRef;
+import net.tfminecraft.tlibs.character.CharacterStatus;
 import org.bukkit.Material;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -348,11 +351,13 @@ class CommandManagerTest {
     assertEquals(List.of("reload"), tab("re"));
     player.addAttachment(MockBukkit.createMockPlugin(), "denareconomy.admin", true);
     assertEquals(List.of("legacy"), tab("le"));
+    assertEquals(List.of("account"), tab("acc"));
+    assertEquals(List.of("move"), tab("mo"));
     assertEquals(List.of("assign"), tab("legacy", "a"));
     assertTrue(
         commands
             .onTabComplete(server.getConsoleSender(), deco, "deco", new String[] {""})
-            .containsAll(List.of("reload", "give", "legacy")));
+            .containsAll(List.of("reload", "give", "legacy", "account", "move")));
     for (String name : List.of("pay", "toitem", "deposit", "withdraw")) {
       assertEquals(List.of("<amount>"), tab(name, ""));
     }
@@ -616,6 +621,204 @@ class CommandManagerTest {
     identity.play(sam);
     commands.onCommand(console, deco, "deco", new String[] {"history", "Sam"});
     messages.verify(() -> MessageLoader.send(console, "history.header", "player", "Sam", "count", 0));
+  }
+
+  @Test
+  void accountNeedsStaffAndExactlyOneCharacter() {
+    run("account", "Kira");
+    messages.verify(() -> MessageLoader.send(player, "errors.no-permission"));
+    CommandSender console = server.getConsoleSender();
+    deco(console, "account");
+    messages.verify(() -> MessageLoader.send(console, "account.usage"));
+    deco(console, "account", "Kira", "Sun");
+    messages.verify(() -> MessageLoader.send(console, "account.unknown", "character", "Kira Sun"));
+    deco(console, "account", "Kira");
+    messages.verify(() -> MessageLoader.send(console, "account.unknown", "character", "Kira"));
+    String unknown = UUID.randomUUID().toString();
+    deco(console, "account", unknown);
+    messages.verify(() -> MessageLoader.send(console, "account.unknown", "character", unknown));
+  }
+
+  @Test
+  void accountShowsADeadCharactersBalancesAndPostingsByIdOrName() {
+    messages
+        .when(() -> MessageLoader.get(eq("history.change"), any(Object[].class)))
+        .thenAnswer(invocation -> invocation.getArgument(2) + " " + invocation.getArgument(4));
+    CharacterRef dead = identity.character(UUID.randomUUID());
+    identity.name(dead, "Ilvaran");
+    Money.fund(Denars.pouch(dead), 34_025);
+    Money.fund(Denars.bank(dead), 200);
+    identity.kill(dead);
+    Money.fund(Denars.pouch(character), 5);
+    Money.fund(Denars.pouch(new CharacterRef(UUID.randomUUID(), UUID.randomUUID())), 5);
+    player.addAttachment(MockBukkit.createMockPlugin(), "denareconomy.admin", true);
+    for (String token : List.of("ilvaran", dead.characterId().toString())) {
+      run("account", token);
+    }
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                player,
+                "account.header",
+                "name",
+                "Ilvaran",
+                "status",
+                CharacterStatus.DEAD,
+                "id",
+                dead.characterId()),
+        times(2));
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                player,
+                "account.balances",
+                "pouch",
+                new BigDecimal("340.25"),
+                "bank",
+                new BigDecimal("2.00")),
+        times(2));
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                eq(player),
+                eq("history.entry"),
+                eq("time"),
+                anyString(),
+                eq("reason"),
+                eq("staff:test"),
+                eq("changes"),
+                eq("bank +2.00")),
+        times(2));
+  }
+
+  @Test
+  void accountFindsANameWithSpaces() {
+    CharacterRef dead = identity.character(UUID.randomUUID());
+    identity.name(dead, "Marco Morales");
+    Money.fund(Denars.bank(dead), 100);
+    identity.kill(dead);
+    CommandSender console = server.getConsoleSender();
+    deco(console, "account", "marco", "morales");
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                console,
+                "account.header",
+                "name",
+                "Marco Morales",
+                "status",
+                CharacterStatus.DEAD,
+                "id",
+                dead.characterId()));
+  }
+
+  @Test
+  void accountListsEveryCharacterSharingAName() {
+    CharacterRef living = identity.character(UUID.randomUUID());
+    CharacterRef rich = identity.character(UUID.randomUUID());
+    CharacterRef dead = identity.character(UUID.randomUUID());
+    for (CharacterRef kira : List.of(living, rich, dead)) {
+      identity.name(kira, "Kira");
+    }
+    Money.fund(Denars.bank(rich), 10);
+    Money.fund(Denars.bank(dead), 10);
+    identity.kill(dead);
+    CommandSender console = server.getConsoleSender();
+    deco(console, "account", "KIRA");
+    messages.verify(() -> MessageLoader.send(console, "account.several", "count", 3, "character", "KIRA"));
+    for (CharacterRef kira : List.of(living, rich, dead)) {
+      messages.verify(
+          () ->
+              MessageLoader.send(
+                  eq(console),
+                  eq("account.match"),
+                  eq("id"),
+                  eq(kira.characterId()),
+                  eq("name"),
+                  eq("Kira"),
+                  eq("status"),
+                  any()));
+    }
+  }
+
+  @Test
+  void moveNeedsStaffValidAccountsAndAPositiveAmount() {
+    String bank = Denars.bank(character);
+    run("move", Denars.MINT, bank, "100", "fix");
+    messages.verify(() -> MessageLoader.send(player, "errors.no-permission"));
+    CommandSender console = server.getConsoleSender();
+    deco(console, "move", Denars.MINT, bank, "100");
+    messages.verify(() -> MessageLoader.send(console, "move.usage"));
+    deco(console, "move", "bank", bank, "100", "fix");
+    messages.verify(() -> MessageLoader.send(console, "move.bad-account", "account", "bank"));
+    deco(console, "move", Denars.MINT, "player:alex", "100", "fix");
+    messages.verify(
+        () -> MessageLoader.send(console, "move.bad-account", "account", "player:alex"));
+    for (String cents : List.of("abc", "0", "-5", "1.50")) {
+      deco(console, "move", Denars.MINT, bank, cents, "fix");
+    }
+    messages.verify(() -> MessageLoader.send(console, "errors.invalid-amount"), times(4));
+    assertEquals(0, bank());
+  }
+
+  @Test
+  void moveTakesMoneyFromADeadCharacterAndIsLogged() {
+    CharacterRef dead = identity.character(UUID.randomUUID());
+    Money.fund(Denars.bank(dead), 500);
+    identity.kill(dead);
+    CommandSender console = server.getConsoleSender();
+    deco(console, "move", Denars.bank(dead), Denars.bank(character), "300", "restore", "after", "revive");
+    assertEquals(200, Denars.balance(Denars.bank(dead)));
+    assertEquals(300, bank());
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                console,
+                "move.moved",
+                "amount",
+                new BigDecimal("3.00"),
+                "from",
+                Denars.bank(dead),
+                "to",
+                Denars.bank(character)));
+    verify(logger)
+        .info(
+            argThat(
+                (String line) ->
+                    line.matches(
+                        ".* moved 3.00 from "
+                            + Denars.bank(dead)
+                            + " to "
+                            + Denars.bank(character)
+                            + " \\(staff:move:[0-9a-f-]{36}\\): restore after revive")));
+    Ledger.Posting posting = DenarEconomy.getLedger().history(List.of(Denars.bank(character)), 1).getFirst();
+    assertEquals("staff:move restore after revive", posting.reason());
+    assertTrue(posting.opId().startsWith("staff:move:"));
+    deco(console, "move", Denars.bank(dead), Denars.bank(character), "201", "too", "much");
+    messages.verify(() -> MessageLoader.send(console, "move.failed", "result", Result.REFUSED));
+    assertEquals(200, Denars.balance(Denars.bank(dead)));
+  }
+
+  @Test
+  void moveNeverTakesAGuildBelowZero() {
+    String guild = Denars.guild(UUID.randomUUID());
+    Money.fund(guild, 100);
+    CommandSender console = server.getConsoleSender();
+    deco(console, "move", guild, Denars.bank(character), "101", "wages");
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                console, "move.guild-short", "account", guild, "balance", new BigDecimal("1.00")));
+    assertEquals(100, Denars.balance(guild));
+    deco(console, "move", guild, Denars.bank(character), "100", "wages");
+    assertEquals(0, Denars.balance(guild));
+    deco(console, "move", Denars.MINT, guild, "50", "grant");
+    assertEquals(50, Denars.balance(guild));
+    assertEquals(100, bank());
+  }
+
+  private void deco(CommandSender sender, String... args) {
+    assertTrue(commands.onCommand(sender, deco, "deco", args));
   }
 
   private void give(CommandSender sender, String... args) {

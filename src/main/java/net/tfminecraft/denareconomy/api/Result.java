@@ -8,6 +8,6 @@ public enum Result {
 	REFUSED,
 	/** The operation ID was already used with different legs or reason. The stored result stands. */
 	CONFLICT,
-	/** The ledger is closed or failed. Nothing was recorded. */
+	/** The ledger is closed or failed, or the operation is reserved for estates. Nothing was recorded. */
 	UNAVAILABLE
 }

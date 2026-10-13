@@ -108,6 +108,44 @@ class DenarsTest {
   }
 
   @Test
+  void estateReasonsAndOperationIdsAreRefusedBeforeAnythingIsRecorded() {
+    String pouch = Denars.pouch(character);
+    Money.fund(pouch, 500);
+    identity.kill(character);
+    List<TaxPolicy> asked = new ArrayList<>();
+    TaxPolicy policy =
+        (earner, gross) -> {
+          asked.add(null);
+          return Optional.empty();
+        };
+    Bukkit.getServicesManager()
+        .register(TaxPolicy.class, policy, MockBukkit.createMockPlugin(), ServicePriority.High);
+    String heir = Denars.bank(identity.character(UUID.randomUUID()));
+    String estate = "estate:" + UUID.randomUUID();
+    assertEquals(
+        Result.UNAVAILABLE,
+        Denars.post("a", estate, List.of(new Leg(pouch, -500), new Leg(heir, 500))));
+    assertEquals(Result.UNAVAILABLE, Denars.transfer("b", estate, pouch, heir, 500));
+    assertEquals(Result.UNAVAILABLE, Denars.transfer(estate + ":1", "will", pouch, heir, 500));
+    assertEquals(Result.UNAVAILABLE, Denars.earn(estate + ":2", character, heir, 500, true));
+    assertEquals(
+        Result.UNAVAILABLE, Denars.trade("c", estate, pouch, character, heir, 500, true));
+    assertEquals(
+        Result.UNAVAILABLE, Denars.trade(estate + ":3", "sale", pouch, character, heir, 500, false));
+    assertTrue(asked.isEmpty(), "the tax policy is not consulted");
+    for (String opId : List.of("a", "b", "c", estate + ":1", estate + ":2", estate + ":3")) {
+      assertEquals(Optional.empty(), Denars.status(opId));
+    }
+    assertEquals(500, Denars.balance(pouch));
+    assertEquals(0, Denars.balance(heir));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> Denars.trade(null, "sale", heir, character, pouch, 1, false));
+    // Staff may still correct a dead character's accounts.
+    assertEquals(Result.APPLIED, Denars.transfer("d", "staff:move fix", pouch, heir, 500));
+  }
+
+  @Test
   void untaxedEarningsAreCreditedInFullWithoutAnEvent() {
     taxAt(10, Denars.guildTax(UUID.randomUUID()));
     assertEquals(Result.APPLIED, Denars.earn("e", character, Denars.bank(character), 1000, false));
@@ -211,9 +249,9 @@ class DenarsTest {
     assertEquals(Result.REFUSED, Denars.transfer("spend", "pay", pouch, Denars.MINT, 100));
     assertEquals(Result.APPLIED, Denars.transfer("wage", "wage", Denars.MINT, pouch, 100));
     assertEquals(
-        Result.APPLIED, Denars.transfer("estate", "estate:heir", pouch, Denars.TAX_VOID, 100));
+        Result.UNAVAILABLE, Denars.transfer("estate", "estate:heir", pouch, Denars.TAX_VOID, 100));
     assertEquals(Result.APPLIED, Denars.transfer("fix", "staff:fix", pouch, Denars.MINT, 100));
-    assertEquals(400, Denars.balance(pouch));
+    assertEquals(500, Denars.balance(pouch));
   }
 
   @Test

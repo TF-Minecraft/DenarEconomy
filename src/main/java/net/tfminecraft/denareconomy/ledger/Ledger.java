@@ -9,6 +9,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +24,8 @@ import org.bukkit.Bukkit;
 
 import net.tfminecraft.denareconomy.api.Leg;
 import net.tfminecraft.denareconomy.api.Result;
+import net.tfminecraft.tlibs.character.CharacterStatus;
+import net.tfminecraft.tlibs.character.Characters;
 import net.tfminecraft.tlibs.database.SqliteDatabase;
 
 /**
@@ -51,6 +54,26 @@ public final class Ledger {
 	/** One applied operation, with its net change per requested account. */
 	public record Posting(String opId, String reason, long created, Map<String, Long> legs) {
 	}
+
+	/**
+	 * What one estate sweep did. {@code opId} is empty when nothing was recorded: the character
+	 * was not DEAD with that death, both balances were zero, the total would overflow or the
+	 * ledger or identity was unavailable. {@code cents} is what an applied sweep moved.
+	 */
+	public record Sweep(Result result, Optional<String> opId, long cents) {
+		static final Sweep UNAVAILABLE = new Sweep(Result.UNAVAILABLE, Optional.empty(), 0);
+		static final Sweep REFUSED = new Sweep(Result.REFUSED, Optional.empty(), 0);
+		static final Sweep EMPTY = new Sweep(Result.APPLIED, Optional.empty(), 0);
+	}
+
+	/** One recorded estate operation and the cents it took from the dead character. */
+	public record EstatePosting(String opId, long number, Result result, long cents) {
+	}
+
+	private record Prepared(Map<String, Long> changes, String fingerprint) {
+	}
+
+	private static final String ESTATE = "estate:";
 
 	private interface Work<T> {
 		T run(Connection connection) throws SQLException;
@@ -102,7 +125,9 @@ public final class Ledger {
 	}
 
 	/**
-	 * Applies every leg or none. Legs on the same account are added together first.
+	 * Applies every leg or none. Legs on the same account are added together first. An operation ID
+	 * or reason starting {@code estate:} is reserved for {@link #sweepEstate} and answers
+	 * {@link Result#UNAVAILABLE} without recording anything.
 	 *
 	 * @throws IllegalArgumentException if an ID is blank, an account ID is malformed or the legs
 	 *                                  do not sum to zero
@@ -110,37 +135,80 @@ public final class Ledger {
 	public Result post(String opId, String reason, List<Leg> legs) {
 		requireText(opId, "operation ID");
 		requireText(reason, "reason");
-		if (legs.isEmpty()) {
-			throw new IllegalArgumentException("A posting needs legs");
+		if (reserved(opId) || reserved(reason)) {
+			log.warning("Refused posting " + opId + ": estate operations are posted only by estate sweeps");
+			return Result.UNAVAILABLE;
 		}
-		Map<String, Long> net = new TreeMap<>();
-		List<String> lines = new ArrayList<>();
-		long sum = 0;
-		boolean overflow = false;
-		for (Leg leg : legs) {
-			AccountIds.parse(leg.account());
-			lines.add(leg.account() + "=" + leg.cents());
-			try {
-				sum = Math.addExact(sum, leg.cents());
-				net.merge(leg.account(), leg.cents(), Math::addExact);
-			} catch (ArithmeticException e) {
-				overflow = true;
-			}
-		}
-		if (!overflow && sum != 0) {
-			throw new IllegalArgumentException("Legs of " + opId + " sum to " + sum + ", not zero");
-		}
-		Collections.sort(lines);
-		String fingerprint = UUID.nameUUIDFromBytes(
-				(reason + "\n" + String.join("\n", lines)).getBytes(StandardCharsets.UTF_8)).toString();
-		Map<String, Long> changes = overflow ? null : net;
+		Prepared prepared = prepare(opId, reason, legs);
 		return run("posting " + opId, Result.UNAVAILABLE, connection -> {
 			connection.setAutoCommit(false);
-			Result result = apply(connection, opId, reason, fingerprint, changes);
+			Result result = apply(connection, opId, reason, prepared.fingerprint(), prepared.changes());
 			connection.commit();
 			connection.setAutoCommit(true);
 			return result;
 		});
+	}
+
+	/** Whether this operation ID or reason belongs to estate sweeps. */
+	public static boolean reserved(String text) {
+		return text != null && text.startsWith(ESTATE);
+	}
+
+	/**
+	 * Moves everything in a dead character's pouch and bank to the estate's money recipient, as
+	 * operation {@code estate:<deathId>:<n>}. Before anything is read, the character must be DEAD
+	 * with this {@code deathId}; otherwise nothing is recorded. In one transaction the sweep takes
+	 * {@code n} one above the highest number already used for this death, whatever that
+	 * operation's status, so a number is never reused and a sweep cannot conflict. Zero balances
+	 * post nothing.
+	 *
+	 * <p>Package-private: only {@link MoneyEstates} sweeps, after the estate guard.
+	 *
+	 * @throws IllegalArgumentException if the recipient is not a ledger account
+	 */
+	Sweep sweepEstate(UUID deathId, UUID characterId, String recipientAccount) {
+		requireMainThread();
+		AccountIds.parse(recipientAccount);
+		if (!Characters.available()) {
+			return Sweep.UNAVAILABLE;
+		}
+		boolean dead = Characters.info(characterId).map(info -> info.status() == CharacterStatus.DEAD).orElse(false);
+		if (!dead || !Characters.deathId(characterId).equals(Optional.of(deathId))) {
+			return Sweep.REFUSED;
+		}
+		String pouch = AccountIds.pouch(characterId);
+		String bank = AccountIds.bank(characterId);
+		return run("sweeping estate " + deathId, Sweep.UNAVAILABLE, connection -> {
+			connection.setAutoCommit(false);
+			long last = estatePostings(connection, deathId).stream().mapToLong(EstatePosting::number).max().orElse(0);
+			long inPouch = balance(connection, pouch);
+			long inBank = balance(connection, bank);
+			Sweep sweep;
+			if (inPouch <= 0 && inBank <= 0) {
+				sweep = Sweep.EMPTY;
+			} else if (inPouch > Long.MAX_VALUE - inBank) {
+				sweep = Sweep.REFUSED;
+			} else {
+				String opId = ESTATE + deathId + ":" + (last + 1);
+				long total = inPouch + inBank;
+				// Both debits always, so a zero leg still counts in the fingerprint.
+				Prepared prepared = prepare(opId, ESTATE + deathId, List.of(new Leg(pouch, -inPouch),
+						new Leg(bank, -inBank), new Leg(recipientAccount, total)));
+				Result result = apply(connection, opId, ESTATE + deathId, prepared.fingerprint(), prepared.changes());
+				sweep = new Sweep(result, Optional.of(opId), result == Result.APPLIED ? total : 0);
+			}
+			connection.commit();
+			connection.setAutoCommit(true);
+			return sweep;
+		});
+	}
+
+	/**
+	 * Every estate operation recorded for this death, in number order, with the cents it took from
+	 * the dead character. Empty when the ledger is closed.
+	 */
+	public List<EstatePosting> estatePostings(UUID deathId) {
+		return run("reading estate " + deathId, List.of(), connection -> List.copyOf(estatePostings(connection, deathId)));
 	}
 
 	/** The stored result of an operation, or empty if it was never posted or the ledger is closed. */
@@ -286,6 +354,61 @@ public final class Ledger {
 			after.put(account, next);
 		}
 		return after;
+	}
+
+	/**
+	 * Nets the legs per account and fingerprints the posting. The changes are null when a sum
+	 * overflows, which refuses the posting.
+	 */
+	private static Prepared prepare(String opId, String reason, List<Leg> legs) {
+		if (legs.isEmpty()) {
+			throw new IllegalArgumentException("A posting needs legs");
+		}
+		Map<String, Long> net = new TreeMap<>();
+		List<String> lines = new ArrayList<>();
+		long sum = 0;
+		boolean overflow = false;
+		for (Leg leg : legs) {
+			AccountIds.parse(leg.account());
+			lines.add(leg.account() + "=" + leg.cents());
+			try {
+				sum = Math.addExact(sum, leg.cents());
+				net.merge(leg.account(), leg.cents(), Math::addExact);
+			} catch (ArithmeticException e) {
+				overflow = true;
+			}
+		}
+		if (!overflow && sum != 0) {
+			throw new IllegalArgumentException("Legs of " + opId + " sum to " + sum + ", not zero");
+		}
+		Collections.sort(lines);
+		String fingerprint = UUID.nameUUIDFromBytes(
+				(reason + "\n" + String.join("\n", lines)).getBytes(StandardCharsets.UTF_8)).toString();
+		return new Prepared(overflow ? null : net, fingerprint);
+	}
+
+	/** Every operation numbered under {@code estate:<deathId>:}, whatever its status, by number. */
+	private static List<EstatePosting> estatePostings(Connection connection, UUID deathId) throws SQLException {
+		String prefix = ESTATE + deathId + ":";
+		List<EstatePosting> postings = new ArrayList<>();
+		try (PreparedStatement query = connection.prepareStatement(
+				"SELECT o.op_id, o.status, COALESCE((SELECT -SUM(l.cents) FROM legs l WHERE l.op_id = o.op_id"
+						+ " AND l.cents < 0), 0) FROM operations o WHERE o.op_id >= ? AND o.op_id < ?")) {
+			query.setString(1, prefix);
+			// ';' follows ':', so this range is every ID starting with the prefix.
+			query.setString(2, ESTATE + deathId + ";");
+			ResultSet row = query.executeQuery();
+			while (row.next()) {
+				String suffix = row.getString(1).substring(prefix.length());
+				// Numbers only: an older jar may have stored other IDs under this prefix.
+				if (suffix.matches("[0-9]{1,18}")) {
+					postings.add(new EstatePosting(row.getString(1), Long.parseLong(suffix),
+							Result.valueOf(row.getString(2)), row.getLong(3)));
+				}
+			}
+		}
+		postings.sort(Comparator.comparingLong(EstatePosting::number));
+		return postings;
 	}
 
 	/** The stored fingerprint and status of an operation, or null. */

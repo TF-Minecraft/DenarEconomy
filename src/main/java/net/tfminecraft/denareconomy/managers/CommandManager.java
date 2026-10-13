@@ -5,6 +5,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,6 +34,7 @@ import net.tfminecraft.denareconomy.database.BalTopEntry;
 import net.tfminecraft.denareconomy.database.Database;
 import net.tfminecraft.denareconomy.enums.Accounts;
 import net.tfminecraft.denareconomy.item.Coin;
+import net.tfminecraft.denareconomy.ledger.AccountIds;
 import net.tfminecraft.denareconomy.ledger.LegacyMigration;
 import net.tfminecraft.denareconomy.ledger.Ledger;
 import net.tfminecraft.denareconomy.loaders.CoinLoader;
@@ -62,6 +65,12 @@ public class CommandManager implements CommandExecutor, TabCompleter {
                     return true;
                 case "history":
                     handleHistory(sender, args);
+                    return true;
+                case "account":
+                    handleAccount(sender, args);
+                    return true;
+                case "move":
+                    handleMove(sender, args);
                     return true;
                 default:
                     break;
@@ -279,6 +288,11 @@ public class CommandManager implements CommandExecutor, TabCompleter {
         String bank = Denars.bank(character.get());
         List<Ledger.Posting> postings = DenarEconomy.getLedger().history(List.of(pouch, bank), HISTORY_LIMIT);
         MessageLoader.send(sender, "history.header", "player", name, "count", postings.size());
+        showPostings(sender, pouch, postings);
+    }
+
+    /** One line per posting, naming the pouch or bank each change touched. */
+    private static void showPostings(CommandSender sender, String pouch, List<Ledger.Posting> postings) {
         for (Ledger.Posting posting : postings) {
             List<String> changes = new ArrayList<>();
             posting.legs().forEach((account, cents) -> changes.add(MessageLoader.get("history.change",
@@ -287,6 +301,111 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             MessageLoader.send(sender, "history.entry", "time", HISTORY_TIME.format(Instant.ofEpochMilli(posting.created())),
                     "reason", posting.reason(), "changes", String.join(", ", changes));
         }
+    }
+
+    /** /deco account <character name|id>: both balances and the latest postings of any character. */
+    private void handleAccount(CommandSender sender, String[] args) {
+        if (!canAdminister(sender)) {
+            MessageLoader.send(sender, "errors.no-permission");
+            return;
+        }
+        if (args.length < 2) {
+            MessageLoader.send(sender, "account.usage");
+            return;
+        }
+        // Most character names have a space.
+        String name = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
+        List<CharacterInfo> matches = findCharacters(name);
+        if (matches.isEmpty()) {
+            MessageLoader.send(sender, "account.unknown", "character", name);
+            return;
+        }
+        if (matches.size() > 1) {
+            MessageLoader.send(sender, "account.several", "count", matches.size(), "character", name);
+            for (CharacterInfo match : matches) {
+                MessageLoader.send(sender, "account.match", "id", match.ref().characterId(), "name", match.name(),
+                        "status", match.status());
+            }
+            return;
+        }
+        CharacterInfo info = matches.getFirst();
+        String pouch = Denars.pouch(info.ref());
+        String bank = Denars.bank(info.ref());
+        MessageLoader.send(sender, "account.header", "name", info.name(), "status", info.status(),
+                "id", info.ref().characterId());
+        MessageLoader.send(sender, "account.balances", "pouch", MoneyManager.denars(Denars.balance(pouch)),
+                "bank", MoneyManager.denars(Denars.balance(bank)));
+        showPostings(sender, pouch, DenarEconomy.getLedger().history(List.of(pouch, bank), HISTORY_LIMIT));
+    }
+
+    /**
+     * A character by ID, or every character with this name: living ones from the directory and,
+     * since the directory finds only living characters by name, any other with a ledger account.
+     */
+    private static List<CharacterInfo> findCharacters(String token) {
+        try {
+            return Characters.info(UUID.fromString(token)).map(List::of).orElse(List.of());
+        } catch (IllegalArgumentException notAnId) {
+            Map<UUID, CharacterInfo> found = new LinkedHashMap<>();
+            Characters.findByName(token).forEach(info -> found.put(info.ref().characterId(), info));
+            for (Ledger.Row row : DenarEconomy.getLedger().accounts("char")) {
+                Characters.info(UUID.fromString(row.character()))
+                        .filter(info -> info.name().equalsIgnoreCase(token))
+                        .ifPresent(info -> found.putIfAbsent(info.ref().characterId(), info));
+            }
+            return List.copyOf(found.values());
+        }
+    }
+
+    /**
+     * /deco move <from account> <to account> <cents> <note>: a staff correction between any two
+     * accounts, dead characters' included. It never takes a guild treasury below zero.
+     */
+    private void handleMove(CommandSender sender, String[] args) {
+        if (!canAdminister(sender)) {
+            MessageLoader.send(sender, "errors.no-permission");
+            return;
+        }
+        if (args.length < 5) {
+            MessageLoader.send(sender, "move.usage");
+            return;
+        }
+        String from = args[1];
+        String to = args[2];
+        for (String account : List.of(from, to)) {
+            try {
+                AccountIds.parse(account);
+            } catch (IllegalArgumentException ex) {
+                MessageLoader.send(sender, "move.bad-account", "account", account);
+                return;
+            }
+        }
+        long cents;
+        try {
+            cents = Long.parseLong(args[3]);
+        } catch (NumberFormatException ex) {
+            cents = 0;
+        }
+        if (cents <= 0) {
+            MessageLoader.send(sender, "errors.invalid-amount");
+            return;
+        }
+        long held = Denars.balance(from);
+        if (from.startsWith("guild:") && held < cents) {
+            MessageLoader.send(sender, "move.guild-short", "account", from, "balance", MoneyManager.denars(held));
+            return;
+        }
+        String note = String.join(" ", Arrays.copyOfRange(args, 4, args.length));
+        String opId = "staff:move:" + UUID.randomUUID();
+        Result result = Denars.transfer(opId, "staff:move " + note, from, to, cents);
+        if (result != Result.APPLIED) {
+            MessageLoader.send(sender, "move.failed", "result", result);
+            return;
+        }
+        BigDecimal amount = MoneyManager.denars(cents);
+        DenarEconomy.plugin.getLogger().info(sender.getName() + " moved " + amount + " from " + from + " to " + to
+                + " (" + opId + "): " + note);
+        MessageLoader.send(sender, "move.moved", "amount", amount, "from", from, "to", to);
     }
 
     private void handleBalTop(Player p) {
@@ -492,6 +611,8 @@ public class CommandManager implements CommandExecutor, TabCompleter {
                 }
                 if (canAdminister(sender)) {
                     completions.add("legacy");
+                    completions.add("account");
+                    completions.add("move");
                 }
             } else if (args.length > 1 && args[0].equalsIgnoreCase("give")) {
                 if (canGive(sender)) {

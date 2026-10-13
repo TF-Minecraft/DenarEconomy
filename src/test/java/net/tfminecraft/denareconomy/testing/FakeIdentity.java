@@ -23,6 +23,7 @@ public final class FakeIdentity implements CharacterIdentity {
   public final Map<UUID, CharacterSession> sessions = new HashMap<>();
   public final Map<UUID, CharacterInfo> characters = new HashMap<>();
   public final Map<UUID, CharacterRef> heirs = new HashMap<>();
+  public final Map<UUID, UUID> deaths = new HashMap<>();
   public boolean heirsReady;
   private long nextSession;
 
@@ -57,13 +58,37 @@ public final class FakeIdentity implements CharacterIdentity {
     sessions.remove(player.getUniqueId());
   }
 
-  public void kill(CharacterRef ref) {
-    characters.put(ref.characterId(), info(ref, CharacterStatus.DEAD));
+  /** Marks the character DEAD with a new death ID, which it returns. */
+  public UUID kill(CharacterRef ref) {
+    UUID deathId = UUID.randomUUID();
+    set(ref, CharacterStatus.DEAD);
+    deaths.put(ref.characterId(), deathId);
+    return deathId;
+  }
+
+  /** Brings the character back; like the directory, it keeps the last death ID. */
+  public void revive(CharacterRef ref) {
+    set(ref, CharacterStatus.ALIVE);
+  }
+
+  public void set(CharacterRef ref, CharacterStatus status) {
+    CharacterInfo old = characters.get(ref.characterId());
+    String name = old == null ? defaultName(ref) : old.name();
+    characters.put(ref.characterId(), new CharacterInfo(ref, name, status, null, Set.of(), 0, null));
+  }
+
+  /** Renames the character, keeping its status. */
+  public void name(CharacterRef ref, String name) {
+    CharacterInfo old = characters.get(ref.characterId());
+    characters.put(ref.characterId(), new CharacterInfo(ref, name, old.status(), null, Set.of(), 0, null));
   }
 
   private static CharacterInfo info(CharacterRef ref, CharacterStatus status) {
-    return new CharacterInfo(
-        ref, "Char-" + ref.characterId().toString().substring(0, 4), status, null, Set.of(), 0, null);
+    return new CharacterInfo(ref, defaultName(ref), status, null, Set.of(), 0, null);
+  }
+
+  private static String defaultName(CharacterRef ref) {
+    return "Char-" + ref.characterId().toString().substring(0, 4);
   }
 
   @Override
@@ -79,6 +104,18 @@ public final class FakeIdentity implements CharacterIdentity {
   @Override
   public Optional<CharacterInfo> info(UUID characterId) {
     return Optional.ofNullable(characters.get(characterId));
+  }
+
+  @Override
+  public Optional<UUID> deathId(UUID characterId) {
+    return Optional.ofNullable(deaths.get(characterId));
+  }
+
+  @Override
+  public List<CharacterInfo> findByName(String name) {
+    return characters.values().stream()
+        .filter(c -> c.alive() && c.name().equalsIgnoreCase(name))
+        .toList();
   }
 
   @Override

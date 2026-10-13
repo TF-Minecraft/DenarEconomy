@@ -14,7 +14,8 @@ Money belongs to characters: each character has its own pouch and bank, and swit
 - **Multiple denominations** — represent values with gold and silver coins, handfuls, stacks, and pouches of coins.
 - **Coins in the world** — drop money from your pouch as physical coins for others to collect.
 - **Balance visibility** — inspect your character's balances and recent postings, and view a leaderboard of the wealthiest characters.
-- **Admin credits** — staff can credit the bank or pouch of the character a player is playing.
+- **Admin credits** — staff can credit the bank or pouch of the character a player is playing, read any character's ledger, dead or alive, and correct balances between accounts.
+- **Estates** — when a dead character's estate is decided, its pouch and bank go to the heir, the guild or the realm, and money that arrives later follows hourly.
 - **Legacy money** — balances from before characters had their own money move to each account's heir; staff assign the rest.
 - **Shared earnings** — give other plugins a common way to pay, charge and tax characters, and to respond to income, banking, and material deposits.
 

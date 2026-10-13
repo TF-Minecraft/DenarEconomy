@@ -15,7 +15,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.proc>full</maven.compiler.proc>
-        <tlibs.version>2.4.0</tlibs.version>
+        <tlibs.version>2.6.0</tlibs.version>
     </properties>
 
     <dependencies>
