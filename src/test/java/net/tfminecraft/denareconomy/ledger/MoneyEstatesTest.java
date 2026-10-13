@@ -281,6 +281,7 @@ class MoneyEstatesTest {
             new GuildRef(realm, "Realm", Optional.empty(), Optional.empty(), treasury)));
     assertEquals(done(900, op(1)), money.settle(decision));
     assertEquals(900, ledger.balance(treasury), "the treasury SimpleFactions names");
+    Money.fund(bank(), 10);
     estates.guilds.put(
         realm,
         GuildLookup.live(
@@ -341,6 +342,40 @@ class MoneyEstatesTest {
   }
 
   @Test
+  void nothingLeftToMoveIsDoneWhateverBecameOfTheGuild() {
+    dies(0, 900);
+    estates.live(guild);
+    Recipient toGuild = Recipient.account(AccountIds.guild(guild));
+    assertEquals(done(900, op(1)), money.settle(decide(toGuild)));
+    // The guild is deleted and a new revision is decided; the accounts are already empty.
+    estates.guilds.remove(guild);
+    EstateDecision revised =
+        estates.decide(dead, deathId, toGuild, Optional.of(guild), Optional.empty(), 1);
+    estates.guildCalls.clear();
+    assertEquals(done(900, op(1)), money.settle(revised));
+    estates.guilds.put(guild, GuildLookup.UNAVAILABLE);
+    assertEquals(done(900, op(1)), money.settle(revised));
+    assertTrue(estates.guildCalls.isEmpty(), "the guild is not asked when nothing moves");
+    // A late credit has somewhere to go again only once staff decide.
+    estates.guilds.remove(guild);
+    estates.death = DeathGuild.NONE;
+    Money.fund(bank(), 40);
+    assertEquals(
+        Outcome.blocked("Guild " + guild + " is gone and has no realm to take its money"),
+        money.settle(revised));
+    assertEquals(40, ledger.balance(bank()));
+  }
+
+  @Test
+  void aClosedLedgerIsNotMistakenForEmptyAccounts() {
+    dies(0, 0);
+    ledger.close();
+    assertEquals(
+        Outcome.retry("The ledger or the character directory is unavailable"),
+        money.settle(decide(Recipient.account(AccountIds.guild(guild)))));
+  }
+
+  @Test
   void anUnansweredGuildLookupSkipsTheSweep() {
     dies(0, 900);
     estates.guilds.put(guild, GuildLookup.UNAVAILABLE);
@@ -391,6 +426,8 @@ class MoneyEstatesTest {
   void aConflictWhichTheNumberingPreventsWouldBeListedForStaff() {
     dies(0, 900);
     Ledger conflicting = mock(Ledger.class);
+    when(conflicting.isOpen()).thenReturn(true);
+    when(conflicting.balance(bank())).thenReturn(900L);
     when(conflicting.sweepEstate(any(), any(), any()))
         .thenReturn(new Ledger.Sweep(Result.CONFLICT, Optional.of(op(1)), 0));
     DenarEconomy.setLedger(conflicting);
@@ -402,6 +439,12 @@ class MoneyEstatesTest {
           .thenReturn(new Ledger.Sweep(Result.REFUSED, Optional.empty(), 0));
       assertEquals(
           Outcome.retry("The ledger refused the sweep of an overflowing total"),
+          money.settle(decide(Recipient.account(AccountIds.bank(UUID.randomUUID())))));
+      // The ledger failing during the sweep itself.
+      when(conflicting.sweepEstate(any(), any(), any()))
+          .thenReturn(new Ledger.Sweep(Result.UNAVAILABLE, Optional.empty(), 0));
+      assertEquals(
+          Outcome.retry("The ledger or the character directory is unavailable"),
           money.settle(decide(Recipient.account(AccountIds.bank(UUID.randomUUID())))));
     } finally {
       DenarEconomy.setLedger(ledger);

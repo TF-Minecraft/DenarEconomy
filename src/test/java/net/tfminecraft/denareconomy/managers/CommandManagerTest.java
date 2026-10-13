@@ -629,8 +629,9 @@ class CommandManagerTest {
     messages.verify(() -> MessageLoader.send(player, "errors.no-permission"));
     CommandSender console = server.getConsoleSender();
     deco(console, "account");
+    messages.verify(() -> MessageLoader.send(console, "account.usage"));
     deco(console, "account", "Kira", "Sun");
-    messages.verify(() -> MessageLoader.send(console, "account.usage"), times(2));
+    messages.verify(() -> MessageLoader.send(console, "account.unknown", "character", "Kira Sun"));
     deco(console, "account", "Kira");
     messages.verify(() -> MessageLoader.send(console, "account.unknown", "character", "Kira"));
     String unknown = UUID.randomUUID().toString();
@@ -688,6 +689,27 @@ class CommandManagerTest {
                 eq("changes"),
                 eq("bank +2.00")),
         times(2));
+  }
+
+  @Test
+  void accountFindsANameWithSpaces() {
+    CharacterRef dead = identity.character(UUID.randomUUID());
+    identity.name(dead, "Marco Morales");
+    Money.fund(Denars.bank(dead), 100);
+    identity.kill(dead);
+    CommandSender console = server.getConsoleSender();
+    deco(console, "account", "marco", "morales");
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                console,
+                "account.header",
+                "name",
+                "Marco Morales",
+                "status",
+                CharacterStatus.DEAD,
+                "id",
+                dead.characterId()));
   }
 
   @Test

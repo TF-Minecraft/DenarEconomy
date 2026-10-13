@@ -79,11 +79,20 @@ public final class MoneyEstates implements EstateParticipant {
 			// FROZEN: the money stays on the dead character's accounts for staff.
 			return Outcome.done();
 		}
+		Ledger ledger = DenarEconomy.getLedger();
+		UUID testator = decision.testator().characterId();
+		boolean empty = ledger.balance(AccountIds.pouch(testator)) == 0 && ledger.balance(AccountIds.bank(testator)) == 0;
+		if (!ledger.isOpen()) {
+			return unavailable();
+		}
+		if (empty) {
+			// Nothing to move, so the recipient does not matter: no guild check can block or delay it.
+			return done(ledger, decision.deathId());
+		}
 		Target target = target(decision, account.get());
 		if (target.stop() != null) {
 			return target.stop();
 		}
-		Ledger ledger = DenarEconomy.getLedger();
 		Ledger.Sweep sweep;
 		try {
 			sweep = ledger.sweepEstate(decision.deathId(), decision.testator().characterId(), target.account());
@@ -93,7 +102,7 @@ public final class MoneyEstates implements EstateParticipant {
 		return switch (sweep.result()) {
 			case APPLIED -> done(ledger, decision.deathId());
 			case REFUSED -> Outcome.retry("The ledger refused the sweep " + sweep.opId().orElse("of an overflowing total"));
-			case UNAVAILABLE -> Outcome.retry("The ledger or the character directory is unavailable");
+			case UNAVAILABLE -> unavailable();
 			case CONFLICT -> Outcome.blocked("Sweep " + sweep.opId().orElse("") + " conflicts with a stored operation");
 		};
 	}
@@ -180,6 +189,10 @@ public final class MoneyEstates implements EstateParticipant {
 			return Target.stop(Outcome.retry("SimpleFactions cannot say whether realm " + realm.get() + " still exists"));
 		}
 		return Target.stop(Outcome.blocked("Guild " + guild + " and its realm " + realm.get() + " are gone"));
+	}
+
+	private static Outcome unavailable() {
+		return Outcome.retry("The ledger or the character directory is unavailable");
 	}
 
 	private static Outcome notAnAccount(String account) {

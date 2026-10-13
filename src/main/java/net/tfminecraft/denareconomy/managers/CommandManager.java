@@ -309,17 +309,19 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             MessageLoader.send(sender, "errors.no-permission");
             return;
         }
-        if (args.length != 2) {
+        if (args.length < 2) {
             MessageLoader.send(sender, "account.usage");
             return;
         }
-        List<CharacterInfo> matches = findCharacters(args[1]);
+        // Most character names have a space.
+        String name = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
+        List<CharacterInfo> matches = findCharacters(name);
         if (matches.isEmpty()) {
-            MessageLoader.send(sender, "account.unknown", "character", args[1]);
+            MessageLoader.send(sender, "account.unknown", "character", name);
             return;
         }
         if (matches.size() > 1) {
-            MessageLoader.send(sender, "account.several", "count", matches.size(), "character", args[1]);
+            MessageLoader.send(sender, "account.several", "count", matches.size(), "character", name);
             for (CharacterInfo match : matches) {
                 MessageLoader.send(sender, "account.match", "id", match.ref().characterId(), "name", match.name(),
                         "status", match.status());
