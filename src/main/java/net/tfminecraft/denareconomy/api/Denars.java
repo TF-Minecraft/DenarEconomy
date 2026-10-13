@@ -25,7 +25,9 @@ import net.tfminecraft.tlibs.character.Characters;
  * <p>Account IDs: {@link #pouch}, {@link #bank}, {@link #guild}, {@link #guildTax},
  * {@link #MINT} and {@link #TAX_VOID}. Character and tax holding accounts never go below zero;
  * guild treasuries and system accounts may. A dead character's accounts refuse debits unless the
- * reason starts with {@code staff:} or {@code estate:}.
+ * reason starts with {@code staff:}; DenarEconomy itself moves them to the character's estate.
+ * Operation IDs and reasons starting {@code estate:} are reserved for that: every posting method
+ * answers {@link Result#UNAVAILABLE} for them and records nothing.
  *
  * <p>Main thread only: every method except the account ID helpers throws
  * {@link IllegalStateException} elsewhere, before any lookup or tax policy runs.
@@ -125,6 +127,8 @@ public final class Denars {
 	private static Result pay(String opId, String reason, String from, CharacterRef earner, String to, long cents,
 			boolean taxable) {
 		requirePositive(cents);
+		// Refused before any tax policy runs; the ledger would refuse it too.
+		if (Ledger.reserved(opId) || Ledger.reserved(reason)) return Result.UNAVAILABLE;
 		if (taxable && !taxReady()) return Result.UNAVAILABLE;
 		List<Leg> legs = new ArrayList<>(List.of(new Leg(from, -cents)));
 		Optional<TaxLeg> tax = taxable ? taxLeg(earner, cents) : Optional.empty();

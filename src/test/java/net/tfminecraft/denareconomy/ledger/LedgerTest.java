@@ -228,17 +228,16 @@ class LedgerTest {
   }
 
   @Test
-  void frozenAccountsRefuseDebitsOutsideStaffAndEstatesButTakeCredits() {
+  void frozenAccountsRefuseDebitsOutsideStaffButTakeCredits() {
     String dead = pouch();
     move("fund", "earn", MINT, dead, 500);
     frozen.add(dead);
     assertEquals(Result.APPLIED, move("wage", "wage", MINT, dead, 100));
     assertEquals(Result.REFUSED, move("spend", "pay", dead, MINT, 100));
     assertEquals(Result.APPLIED, move("fix", "staff:refund", dead, MINT, 100));
-    assertEquals(Result.APPLIED, move("will", "estate:heir", dead, pouch(), 100));
-    assertEquals(400, ledger.balance(dead));
+    assertEquals(500, ledger.balance(dead));
     // Rules for the kind of account still apply to exempt postings.
-    assertEquals(Result.REFUSED, move("over", "staff:fix", dead, MINT, 401));
+    assertEquals(Result.REFUSED, move("over", "staff:fix", dead, MINT, 501));
     frozen.add(AccountIds.guild(UUID.randomUUID()));
     assertEquals(Result.REFUSED, move("g", "upkeep", frozen.getLast(), MINT, 1));
   }
