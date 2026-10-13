@@ -37,6 +37,12 @@ public final class FakeEstates implements EstateService, EstateFallback {
   public final List<UUID> guildCalls = new ArrayList<>();
   /** Thrown by guild lookups when set. */
   public RuntimeException failure;
+  /** Thrown by reports when set. */
+  public RuntimeException reportFailure;
+  /** Runs at each guild lookup when set. */
+  public Runnable onGuild;
+  /** The answer to every death guild question. */
+  public DeathGuild death = DeathGuild.UNAVAILABLE;
 
   /** Registers this as both the estate service and the guild fallback. */
   public static FakeEstates register() {
@@ -54,6 +60,10 @@ public final class FakeEstates implements EstateService, EstateFallback {
   public void registerFallback() {
     Bukkit.getServicesManager()
         .register(EstateFallback.class, this, MockBukkit.createMockPlugin(), ServicePriority.Normal);
+  }
+
+  public void unregisterService() {
+    Bukkit.getServicesManager().unregister(EstateService.class, this);
   }
 
   public void unregisterFallback() {
@@ -113,17 +123,23 @@ public final class FakeEstates implements EstateService, EstateFallback {
 
   @Override
   public void report(UUID deathId, String participantId, long revision, Outcome outcome) {
+    if (reportFailure != null) {
+      throw reportFailure;
+    }
     reports.add(new Report(deathId, participantId, revision, outcome));
   }
 
   @Override
   public DeathGuild deathGuild(UUID characterId, UUID deathId) {
-    return DeathGuild.UNAVAILABLE;
+    return death;
   }
 
   @Override
   public GuildLookup guild(UUID incarnation) {
     guildCalls.add(incarnation);
+    if (onGuild != null) {
+      onGuild.run();
+    }
     if (failure != null) {
       throw failure;
     }

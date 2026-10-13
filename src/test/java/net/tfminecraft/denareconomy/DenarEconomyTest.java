@@ -97,7 +97,7 @@ class DenarEconomyTest {
       assertTrue(new File(plugin.getDataFolder(), "ledger.db").isFile());
       assertTrue(DenarEconomy.getLedger().isOpen());
       assertInstanceOf(
-          net.tfminecraft.denareconomy.estate.MoneyEstates.class,
+          net.tfminecraft.denareconomy.ledger.MoneyEstates.class,
           Bukkit.getServicesManager()
               .load(net.tfminecraft.tlibs.character.estate.EstateParticipant.class));
       assertTrue(new File(plugin.getDataFolder(), "PlayerData.imported").isDirectory());

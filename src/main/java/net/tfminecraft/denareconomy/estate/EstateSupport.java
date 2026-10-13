@@ -4,6 +4,8 @@ import java.util.logging.Logger;
 
 import org.bukkit.plugin.Plugin;
 
+import net.tfminecraft.denareconomy.ledger.MoneyEstates;
+
 /**
  * Starts the money estate participant when TLibs has the estate API (2.6.0 and later). Nothing
  * here names an estate class, so DenarEconomy still enables on an older TLibs and simply takes no

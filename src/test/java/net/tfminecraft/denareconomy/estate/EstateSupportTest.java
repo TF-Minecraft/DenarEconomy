@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
+import net.tfminecraft.denareconomy.ledger.MoneyEstates;
 import net.tfminecraft.tlibs.character.estate.EstateParticipant;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;

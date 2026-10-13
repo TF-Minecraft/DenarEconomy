@@ -1,4 +1,4 @@
-package net.tfminecraft.denareconomy.estate;
+package net.tfminecraft.denareconomy.ledger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -20,12 +20,14 @@ import net.tfminecraft.denareconomy.testing.FakeEstates;
 import net.tfminecraft.denareconomy.testing.FakeIdentity;
 import net.tfminecraft.denareconomy.testing.Money;
 import net.tfminecraft.tlibs.character.CharacterRef;
+import net.tfminecraft.tlibs.character.estate.DeathGuild;
 import net.tfminecraft.tlibs.character.estate.EstateDecision;
 import net.tfminecraft.tlibs.character.estate.EstateParticipant;
 import net.tfminecraft.tlibs.character.estate.EstateService;
 import net.tfminecraft.tlibs.character.estate.EstateState;
 import net.tfminecraft.tlibs.character.estate.Estates;
 import net.tfminecraft.tlibs.character.estate.GuildLookup;
+import net.tfminecraft.tlibs.character.estate.GuildRef;
 import net.tfminecraft.tlibs.character.estate.Holdings;
 import net.tfminecraft.tlibs.character.estate.Outcome;
 import net.tfminecraft.tlibs.character.estate.Recipient;
@@ -235,9 +237,14 @@ class MoneyEstatesTest {
     assertEquals(Outcome.Kind.RETRY, money.settle(decide(toGuild)).kind());
     // Without a realm, as the capital's own guild, or for a guild staff chose, nothing follows.
     String noRealm = "Guild " + guild + " is gone and has no realm to take its money";
-    assertEquals(
-        Outcome.blocked(noRealm),
-        money.settle(estates.decide(dead, deathId, toGuild, Optional.of(guild), Optional.empty(), 0)));
+    EstateDecision unknownRealm =
+        estates.decide(dead, deathId, toGuild, Optional.of(guild), Optional.empty(), 0);
+    estates.death = DeathGuild.NONE;
+    assertEquals(Outcome.blocked(noRealm), money.settle(unknownRealm));
+    estates.death = DeathGuild.guild(UUID.randomUUID(), false, Optional.empty(), Optional.of(realm));
+    assertEquals(Outcome.blocked(noRealm), money.settle(unknownRealm), "another guild's realm");
+    estates.death = DeathGuild.guild(guild, false, Optional.empty(), Optional.empty());
+    assertEquals(Outcome.blocked(noRealm), money.settle(unknownRealm), "still unknown");
     assertEquals(
         Outcome.blocked(noRealm),
         money.settle(
@@ -250,6 +257,87 @@ class MoneyEstatesTest {
                 dead, deathId, toGuild, Optional.of(UUID.randomUUID()), Optional.of(realm), 0)));
     assertEquals(900, ledger.balance(bank()));
     assertTrue(ledger.estatePostings(deathId).isEmpty(), "no estate operation is recorded");
+  }
+
+  @Test
+  void aRealmUnknownAtTheDecisionIsAskedForAgainAndItsOwnTreasuryUsed() {
+    dies(0, 900);
+    EstateDecision decision =
+        estates.decide(
+            dead,
+            deathId,
+            Recipient.account(AccountIds.guild(guild)),
+            Optional.of(guild),
+            Optional.empty(),
+            0);
+    assertEquals(
+        Outcome.retry("SimpleFactions cannot say which realm guild " + guild + " was in"),
+        money.settle(decision));
+    estates.death = DeathGuild.guild(guild, false, Optional.empty(), Optional.of(realm));
+    String treasury = AccountIds.guild(UUID.randomUUID());
+    estates.guilds.put(
+        realm,
+        GuildLookup.live(
+            new GuildRef(realm, "Realm", Optional.empty(), Optional.empty(), treasury)));
+    assertEquals(done(900, op(1)), money.settle(decision));
+    assertEquals(900, ledger.balance(treasury), "the treasury SimpleFactions names");
+    estates.guilds.put(
+        realm,
+        GuildLookup.live(
+            new GuildRef(realm, "Realm", Optional.empty(), Optional.empty(), "nowhere")));
+    assertEquals(
+        Outcome.blocked("The money recipient nowhere is not a ledger account"),
+        money.settle(decision));
+  }
+
+  @Test
+  void onlyCharacterAccountsAndGuildTreasuriesReceiveEstateMoney() {
+    dies(0, 900);
+    for (String account :
+        List.of(
+            AccountIds.guildTax(guild),
+            AccountIds.legacyBank(UUID.randomUUID()),
+            AccountIds.MINT)) {
+      assertEquals(
+          Outcome.blocked("The money recipient " + account + " is not a character or guild"),
+          money.settle(decide(Recipient.account(account))));
+    }
+    assertTrue(estates.guildCalls.isEmpty());
+    assertEquals(done(900, op(1)), money.settle(decide(Recipient.account(pouch()))));
+    assertEquals(900, ledger.balance(pouch()), "the character's own pouch, as staff may assign");
+  }
+
+  @Test
+  void anOutcomeIsReportedAgainUntilTheServiceHasTakenIt() {
+    dies(0, 500);
+    String heir = AccountIds.bank(UUID.randomUUID());
+    estates.live(guild);
+    EstateDecision decision = decide(Recipient.account(AccountIds.guild(guild)));
+    estates.reportFailure = new IllegalStateException("estate store broken");
+    money.reconcile();
+    assertEquals(500, ledger.balance(AccountIds.guild(guild)), "the money moved");
+    estates.reportFailure = null;
+    money.reconcile();
+    assertEquals(
+        List.of(new FakeEstates.Report(deathId, "denareconomy", 0, done(500, op(1)))),
+        estates.reports,
+        "the failed report is sent again");
+    // RPCharacters' own call does not count as a report, so the next pass reports it once.
+    Money.fund(bank(), 20);
+    assertEquals(done(520, op(1), op(2)), money.settle(decision));
+    money.reconcile();
+    money.reconcile();
+    assertEquals(2, estates.reports.size());
+    // A report nobody received is sent again too.
+    Money.fund(bank(), 30);
+    estates.onGuild = estates::unregisterService;
+    money.reconcile();
+    assertEquals(2, estates.reports.size());
+    estates.onGuild = null;
+    estates.registerService();
+    money.reconcile();
+    assertEquals(done(550, op(1), op(2), op(3)), estates.reports.getLast().outcome());
+    assertEquals(0, ledger.balance(heir));
   }
 
   @Test
@@ -348,6 +436,20 @@ class MoneyEstatesTest {
     decide(Recipient.account(AccountIds.bank(UUID.randomUUID())));
     money.reconcile();
     assertEquals(100, ledger.balance(bank()));
+  }
+
+  @Test
+  void movedCentsAreCappedForTheEstateRecordButAllTheMoneyMoves() {
+    dies(Integer.MAX_VALUE, 5);
+    String heir = AccountIds.bank(UUID.randomUUID());
+    EstateDecision decision = decide(Recipient.account(heir));
+    money.settle(decision);
+    Money.fund(bank(), Long.MAX_VALUE / 2);
+    assertEquals(
+        Outcome.done(
+            Map.of("cents", Integer.MAX_VALUE, "postings", 2), List.of(op(1), op(2))),
+        money.settle(decision));
+    assertEquals(Integer.MAX_VALUE + 5L + Long.MAX_VALUE / 2, ledger.balance(heir));
   }
 
   @Test

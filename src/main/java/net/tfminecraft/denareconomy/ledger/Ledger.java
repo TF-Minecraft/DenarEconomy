@@ -162,9 +162,11 @@ public final class Ledger {
 	 * operation's status, so a number is never reused and a sweep cannot conflict. Zero balances
 	 * post nothing.
 	 *
+	 * <p>Package-private: only {@link MoneyEstates} sweeps, after the estate guard.
+	 *
 	 * @throws IllegalArgumentException if the recipient is not a ledger account
 	 */
-	public Sweep sweepEstate(UUID deathId, UUID characterId, String recipientAccount) {
+	Sweep sweepEstate(UUID deathId, UUID characterId, String recipientAccount) {
 		requireMainThread();
 		AccountIds.parse(recipientAccount);
 		if (!Characters.available()) {
