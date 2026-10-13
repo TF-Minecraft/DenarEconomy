@@ -68,6 +68,21 @@ legacy:
   failed: "%prefix%&cCould not assign the legacy money of %account% (%result%). Nothing has changed."
   assigned: "%prefix%&aMoved the legacy money of %account% to character %character%."
 
+account:
+  usage: "%prefix%&cUsage: /deco account <character name|id>"
+  unknown: "%prefix%&cNo character %character% was found."
+  several: "%prefix%&e%count% characters are called %character%. Use an id:"
+  match: "&7%id% &e%name% &7(%status%)"
+  header: "&e====== &6[%name%] &7%status% %id% &e======"
+  balances: "#3ce8c9Pouch #b39122%pouch%#dbaf1dd&7, bank #b39122%bank%#dbaf1dd"
+
+move:
+  usage: "%prefix%&cUsage: /deco move <from account> <to account> <cents> <note>"
+  bad-account: "%prefix%&c%account% is not a ledger account."
+  guild-short: "%prefix%&c%account% holds only %balance%. A move may not take a guild below zero."
+  failed: "%prefix%&cThe move was not applied (%result%). Nothing has changed."
+  moved: "%prefix%&aMoved #b39122%amount%#dbaf1dd &afrom %from% to %to%."
+
 money:
   earned: "#dbaf1d+#b39122%amount%#dbaf1dd"
   tax: "#44524f(%tax% in tax)"
