@@ -11,13 +11,8 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 
 import net.tfminecraft.denareconomy.database.Database;
-import net.tfminecraft.denareconomy.enums.Accounts;
 
-/**
- * Player names to account IDs, and the name-based balance calls from before characters had their
- * own money. Those calls now act only on an online player's current character; anyone else is
- * refused and logged. Use {@code net.tfminecraft.denareconomy.api.Denars} instead.
- */
+/** Remembered player names for account lookup and legacy-data migration. */
 public final class OfflineModifier {
 	private static final File NAMES = new File("plugins/DenarEconomy/Data/player-names.json");
 	private static final File USER_CACHE = new File("usercache.json");
@@ -32,41 +27,12 @@ public final class OfflineModifier {
 		names().load();
 	}
 
-	/** Signed change on the online player's current character. Returns false for anyone else. */
-	@Deprecated
-	public static boolean apply(String playerName, Accounts account, double amount) {
-		return apply(playerId(playerName), account, amount);
-	}
-
-	/** Signed change on the online player's current character. Returns false for anyone else. */
-	@Deprecated
-	public static boolean apply(UUID playerId, Accounts account, double amount) {
-		return LegacyCalls.apply(playerId, account, amount, "OfflineModifier.apply");
-	}
-
-	/** Signed change on the online player's current character; ignored for anyone else. */
-	@Deprecated
-	public static void change(UUID playerId, Accounts account, double amount) {
-		LegacyCalls.apply(playerId, account, amount, "OfflineModifier.change");
-	}
-
-	@Deprecated
-	public static double balance(String playerName, Accounts account) {
-		return balance(playerId(playerName), account);
-	}
-
-	/** The online player's current character's balance, or zero for anyone else. */
-	@Deprecated
-	public static double balance(UUID playerId, Accounts account) {
-		return LegacyCalls.balance(playerId, account, "OfflineModifier.balance");
-	}
-
 	/** The account id for this name, online or offline, or null when deco does not know them. */
 	public static UUID playerId(String playerName) {
 		return names().resolve(playerName);
 	}
 
-	/** Remember a name that just logged in, so later offline charges still find the account. */
+	/** Remember a name that just logged in for account lookup. */
 	public static void remember(String playerName, UUID playerId) {
 		if (playerId == null) {
 			return;

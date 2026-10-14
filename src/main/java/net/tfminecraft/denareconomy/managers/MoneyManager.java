@@ -46,7 +46,6 @@ import net.tfminecraft.tlibs.TLibs;
 import net.tfminecraft.tlibs.objects.api.ItemAPI;
 import net.Indyuce.mmoitems.MMOItems;
 import net.tfminecraft.denareconomy.DenarEconomy;
-import net.tfminecraft.denareconomy.accounts.LegacyCalls;
 import net.tfminecraft.denareconomy.api.Denars;
 import net.tfminecraft.denareconomy.api.Result;
 import net.tfminecraft.denareconomy.data.Account;
@@ -237,69 +236,9 @@ public class MoneyManager implements Listener{
 
 
 	
-	/**
-	 * @deprecated The tax the registered policy takes from this online player's current character
-	 *             on this amount; zero for anyone else. Use {@code Denars.taxFor}.
-	 */
-	@Deprecated
-	public double doTaxes(String p, double amount) {
-		Player player = p == null ? null : Bukkit.getPlayerExact(p);
-		Optional<CharacterRef> character = LegacyCalls.character(player == null ? null : player.getUniqueId());
-		if (character.isEmpty()) {
-			LegacyCalls.refused("MoneyManager.doTaxes");
-			return 0.0;
-		}
-		return Denars.taxFor(character.get(), LegacyCalls.cents(amount).orElse(0)) / 100.0;
-	}
-	
-	/** @deprecated Credits the player's current character's pouch. Use {@code Denars.earn}. */
-	@Deprecated
-	public void addMoney(Player p, double amount, boolean silent, boolean taxable) {
-		addMoneyToAccount(p.getUniqueId().toString(), amount, silent, taxable, Accounts.POUCH);
-	}
-
 	/** Every character's and unclaimed legacy balance of this kind, in denars. */
 	public double getServerBal(Accounts account) {
 		return Database.getTotalAmount(account);
-	}
-
-	/** @deprecated The online player's current character's balance; zero for anyone else. */
-	@Deprecated
-	public double getBalance(Accounts account, UUID player) {
-		return LegacyCalls.balance(player, account, "MoneyManager.getBalance");
-	}
-
-	/**
-	 * @deprecated Signed change on the online player's current character, refused below zero and
-	 *             for anyone else. Use {@code Denars}.
-	 */
-	@Deprecated
-	public void changeBal(String id, double amount, Accounts a){
-		UUID playerId;
-		try {
-			playerId = UUID.fromString(id);
-		} catch (IllegalArgumentException | NullPointerException ex) {
-			return;
-		}
-		LegacyCalls.apply(playerId, a, amount, "MoneyManager.changeBal");
-	}
-
-	/**
-	 * @deprecated Credits the online player's current character from the mint, less tax when
-	 *             taxable; refused for anyone else. Use {@code Denars.earn}.
-	 */
-	@Deprecated
-	public void addMoneyToAccount(String id, double amount, boolean silent, boolean taxable, Accounts a) {
-		UUID playerId = id == null ? null : UUID.fromString(id);
-		Optional<CharacterRef> character = LegacyCalls.character(playerId);
-		if (character.isEmpty()) {
-			LegacyCalls.refused("MoneyManager.addMoneyToAccount");
-			return;
-		}
-		long cents = LegacyCalls.cents(amount).orElse(0);
-		if (cents <= 0) return;
-		earn(Bukkit.getPlayer(playerId), character.get(), once("api"),
-				LegacyCalls.account(character.get(), a), cents, silent, taxable);
 	}
 
 	/** Credits new money and tells the player what arrived and what was taxed, unless silent. */
