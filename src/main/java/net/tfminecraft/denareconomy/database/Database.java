@@ -8,40 +8,22 @@ import java.util.Map;
 import java.util.UUID;
 
 import net.tfminecraft.denareconomy.DenarEconomy;
-import net.tfminecraft.denareconomy.accounts.LegacyCalls;
-import net.tfminecraft.denareconomy.data.PlayerData;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
+
+import net.tfminecraft.denareconomy.api.Denars;
 import net.tfminecraft.denareconomy.enums.Accounts;
 import net.tfminecraft.denareconomy.ledger.Ledger;
 import net.tfminecraft.tlibs.character.CharacterInfo;
 import net.tfminecraft.tlibs.character.Characters;
 
-/**
- * Balances from the ledger. The per-player methods act only on an online player's current
- * character; anyone else is refused and logged. Use {@code net.tfminecraft.denareconomy.api.Denars}.
- */
+/** Ledger totals, rankings and online character readiness. */
 public class Database {
-
-    /** @deprecated Balances live in the ledger. This does nothing. */
-    @Deprecated
-    public static void savePlayerData(PlayerData data) {
-        LegacyCalls.refused("Database.savePlayerData");
-    }
-
-    /** @deprecated Read-only balances of the online player's current character; zero for anyone else. */
-    @Deprecated
-    public static PlayerData loadPlayerData(UUID player) {
-        return LegacyCalls.snapshot(player, "Database.loadPlayerData");
-    }
-
-    /** @deprecated The online player's current character's balance; zero for anyone else. */
-    @Deprecated
-    public static double getPlayerBalance(UUID player, Accounts account) {
-        return LegacyCalls.balance(player, account, "Database.getPlayerBalance");
-    }
 
     /** Whether this player is online and playing a character, so has balances to act on. */
     public static boolean hasPlayerData(UUID id) {
-        return LegacyCalls.character(id).isPresent();
+        Player player = id == null ? null : Bukkit.getPlayer(id);
+        return player != null && Denars.active(player).isPresent();
     }
 
     /** Every character's and unclaimed legacy balance of this kind, in denars. */

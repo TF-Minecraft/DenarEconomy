@@ -100,9 +100,6 @@ public class DenarEconomy extends JavaPlugin {
 		}
 	}
 	
-	public static PlayerManager getPlayerManager() {
-		return playerManager;
-	}
 	public static MoneyManager getMoneyManager() {
 		return moneyManager;
 	}

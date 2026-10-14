@@ -13,7 +13,6 @@ import java.util.Map;
 import java.util.UUID;
 import net.tfminecraft.denareconomy.DenarEconomy;
 import net.tfminecraft.denareconomy.database.Database;
-import net.tfminecraft.denareconomy.enums.Accounts;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.Server;
@@ -66,17 +65,12 @@ class OfflineModifierTest {
       assertNull(field("names").get(null));
       OfflineModifier.load();
       assertNull(OfflineModifier.playerId("Unknown"));
-      assertFalse(OfflineModifier.apply("Unknown", Accounts.POUCH, 1));
-      assertEquals(0, OfflineModifier.balance("Unknown", Accounts.BANK));
       OfflineModifier.remember("Alex", id);
       assertTrue(Files.readString(NAMES).contains(id.toString()));
       field("names").set(null, null);
       OfflineModifier.load();
       OfflineModifier.load();
       assertEquals(id, OfflineModifier.playerId("ALEX"));
-      // Alex is offline, so the old money calls refuse.
-      assertFalse(OfflineModifier.apply("Alex", Accounts.BANK, 1));
-      assertEquals(0, OfflineModifier.balance("Alex", Accounts.BANK));
     } finally {
       DenarEconomy.plugin = previous;
     }
