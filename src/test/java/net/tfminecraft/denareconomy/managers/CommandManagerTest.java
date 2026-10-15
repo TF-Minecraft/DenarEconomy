@@ -23,6 +23,8 @@ import net.tfminecraft.denareconomy.testing.FakeIdentity;
 import net.tfminecraft.denareconomy.testing.Money;
 import net.tfminecraft.tlibs.character.CharacterRef;
 import net.tfminecraft.tlibs.character.CharacterStatus;
+import net.tfminecraft.tlibs.character.Characters;
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -418,6 +420,121 @@ class CommandManagerTest {
   }
 
   @Test
+  void completionSnapshotsDoNoDiscoveryAtStartupOrWithoutApplicableAdminDemand() {
+    var ledger = spy(DenarEconomy.getLedger());
+    DenarEconomy.setLedger(ledger);
+    try (var bukkit = mockStatic(Bukkit.class, CALLS_REAL_METHODS);
+        var characters = mockStatic(Characters.class, CALLS_REAL_METHODS)) {
+      commands.startCompletionRefresh(MockBukkit.createMockPlugin());
+      server.addPlayer("JoinedWithoutAdminCompletion");
+      for (String verb : List.of("account", "move", "legacy")) {
+        assertTrue(tab(verb, "").isEmpty());
+      }
+      assertTrue(tab("legacy", "assign", "").isEmpty());
+      player.setOp(true);
+      assertEquals(List.of("Alex"), tab("history", ""));
+      assertEquals(List.of("Alex"), tab("give", ""));
+      assertEquals(List.of("assign"), tab("legacy", ""));
+      assertTrue(tab("legacy", "wrong", "").isEmpty());
+      assertTrue(tab("legacy", "assign", "owner", "character", "").isEmpty());
+      assertTrue(tab("move", "from", "to", "").isEmpty());
+      assertTrue(tab("move", "from", "to", "100", "note").isEmpty());
+      assertTrue(tab("give", "Alex", "").isEmpty());
+      assertTrue(tab("history", "Alex", "").isEmpty());
+      assertTrue(commands.onTabComplete(player, command("pouch"), "pouch", new String[]{""}).isEmpty());
+      server.getScheduler().performTicks(1000);
+      verify(ledger, never()).accounts(anyString());
+      verify(ledger, never()).balance(anyString());
+      verify(ledger, never()).history(anyList(), anyInt());
+      bukkit.verify(Bukkit::getOfflinePlayers, never());
+      characters.verify(() -> Characters.characters(any()), never());
+      characters.verify(() -> Characters.info(any()), never());
+    }
+  }
+
+  @Test
+  void coldAdminRequestsCoalesceAndDiscoverSavedPlayersOnlyOnTheScheduledBuild() {
+    PlayerMock offline = server.addPlayer("OfflineOwner");
+    CharacterRef offlineCharacter = identity.play(offline);
+    identity.name(offlineCharacter, "Offline Character");
+    offline.disconnect();
+    CharacterRef ledgerCharacter = identity.character(UUID.randomUUID());
+    Money.fund(Denars.bank(ledgerCharacter), 10);
+    Money.fund(Denars.pouch(ledgerCharacter), 20);
+    var ledger = spy(DenarEconomy.getLedger());
+    DenarEconomy.setLedger(ledger);
+    commands.startCompletionRefresh(MockBukkit.createMockPlugin());
+    player.addAttachment(MockBukkit.createMockPlugin(), "denareconomy.admin", true);
+    try (var bukkit = mockStatic(Bukkit.class, CALLS_REAL_METHODS);
+        var characters = mockStatic(Characters.class, CALLS_REAL_METHODS)) {
+      for (int i = 0; i < 10; i++) {
+        assertTrue(tab("account", "").isEmpty());
+        assertTrue(tab("move", "").isEmpty());
+        assertTrue(tab("legacy", "assign", "").isEmpty());
+      }
+      verify(ledger, never()).accounts(anyString());
+      bukkit.verify(Bukkit::getOfflinePlayers, never());
+      characters.verify(() -> Characters.characters(any()), never());
+      server.getScheduler().performOneTick();
+      for (String kind : List.of("char", "legacy", "guild", "guildtax", "server")) {
+        verify(ledger).accounts(kind);
+      }
+      bukkit.verify(Bukkit::getOfflinePlayers);
+      characters.verify(() -> Characters.characters(offline.getUniqueId()));
+      characters.verify(() -> Characters.info(ledgerCharacter.characterId()));
+      assertEquals(List.of("Offline Character"), tab("account", "offline"));
+      assertEquals(List.of("server:mint", "server:tax-void"), tab("move", "server:"));
+      clearInvocations(ledger);
+      PlayerMock newcomer = server.addPlayer("NewOwner");
+      CharacterRef newCharacter = identity.play(newcomer);
+      identity.name(newCharacter, "New Character");
+      newcomer.disconnect();
+      server.getScheduler().performTicks(1000);
+      verify(ledger, never()).accounts(anyString());
+      assertEquals(List.of("Offline Character"), tab("account", "offline"));
+      assertTrue(tab("account", "New Character").isEmpty());
+      assertEquals(List.of("server:mint", "server:tax-void"), tab("move", "server:"));
+      verify(ledger, never()).accounts(anyString());
+      server.getScheduler().performOneTick();
+      for (String kind : List.of("char", "legacy", "guild", "guildtax", "server")) {
+        verify(ledger).accounts(kind);
+      }
+      bukkit.verify(Bukkit::getOfflinePlayers);
+      assertEquals(List.of("New Character"), tab("account", "New Character"));
+      server.getScheduler().performTicks(100);
+      assertEquals(List.of("New Character"), tab("account", "New Character"));
+      server.getScheduler().performOneTick();
+      assertEquals(List.of("New Character"), tab("account", "New Character"));
+      bukkit.verify(Bukkit::getOfflinePlayers);
+      assertTrue(ledger.isOpen());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"give", "move"})
+  void staffPostingsDirtyTheCacheButOnlyTheNextApplicableCompletionRebuildsIt(String verb) {
+    player.setOp(true);
+    commands.startCompletionRefresh(MockBukkit.createMockPlugin());
+    assertTrue(tab("move", "").isEmpty());
+    server.getScheduler().performOneTick();
+    String account = verb.equals("give") ? Denars.bank(character) : AccountIds.guild(UUID.randomUUID());
+    assertTrue(tab("move", account).isEmpty());
+    if (verb.equals("give")) run("give", "Alex", "1");
+    else run("move", AccountIds.MINT, account, "100", "correction");
+    var ledger = spy(DenarEconomy.getLedger());
+    DenarEconomy.setLedger(ledger);
+    server.getScheduler().performOneTick();
+    verify(ledger, never()).accounts(anyString());
+    assertTrue(tab("move", account).isEmpty());
+    assertTrue(tab("move", account).isEmpty());
+    verify(ledger, never()).accounts(anyString());
+    server.getScheduler().performOneTick();
+    assertEquals(List.of(account), tab("move", account));
+    verify(ledger).accounts("char");
+    verify(ledger).accounts("guild");
+  }
+
+  @Test
   void staffCompletionsUseAuthoritativeSnapshotsAndOnlyTheRemainingNameSuffix() {
     identity.name(character, "Marco Morales");
     CharacterRef other = identity.character(player.getUniqueId());
@@ -438,6 +555,10 @@ class CommandManagerTest {
     clearInvocations(ledger);
     for (String verb : List.of("history", "account", "move", "legacy")) assertTrue(tab(verb, "").isEmpty());
     player.setOp(true);
+    assertTrue(tab("account", "mAr").isEmpty());
+    verify(ledger, never()).accounts(anyString());
+    server.getScheduler().performOneTick();
+    clearInvocations(ledger);
     assertEquals(List.of("Marco Marquez", "Marco Morales"), tab("account", "mAr"));
     assertEquals(List.of("Marquez", "Morales"), tab("ACCOUNT", "mArCo", ""));
     assertEquals(List.of("Morales"), tab("account", "Marco", "mO"));
@@ -459,9 +580,17 @@ class CommandManagerTest {
     verify(ledger, never()).history(anyList(), anyInt());
     verify(ledger, never()).balance(anyString());
     identity.name(character, "Renamed Character");
+    UUID newGuild = UUID.randomUUID();
+    Money.fund(AccountIds.guild(newGuild), 10);
     server.getScheduler().performTicks(100);
+    verify(ledger, never()).accounts(anyString());
+    assertTrue(tab("account", "renamed").isEmpty());
+    assertTrue(tab("move", AccountIds.guild(newGuild)).isEmpty());
+    verify(ledger, never()).accounts(anyString());
+    server.getScheduler().performOneTick();
     assertEquals(List.of("Renamed Character"), tab("account", "renamed"));
     assertTrue(tab("account", "Marco", "Mor").isEmpty());
+    assertEquals(List.of(AccountIds.guild(newGuild)), tab("move", AccountIds.guild(newGuild)));
     assertTrue(ledger.isOpen());
   }
 
@@ -476,6 +605,8 @@ class CommandManagerTest {
     Money.fund(AccountIds.legacyBank(stranger), 30);
     commands.startCompletionRefresh(MockBukkit.createMockPlugin());
     assertEquals(List.of("assign"), tab("legacy", "As"));
+    assertTrue(tab("legacy", "assign", "").isEmpty());
+    server.getScheduler().performOneTick();
     assertEquals(java.util.Set.of(owner.toString(), stranger.toString()), new java.util.HashSet<>(tab("legacy", "assign", "")));
     assertEquals(List.of(owner.toString()), tab("LEGACY", "ASSIGN", owner.toString().substring(0, 15)));
     assertEquals(java.util.Set.of(character.characterId().toString(), sameOwner.characterId().toString()),
@@ -487,7 +618,9 @@ class CommandManagerTest {
     assertTrue(tab("legacy", "assign", owner.toString(), "missing").isEmpty());
     assertTrue(tab("legacy", "assign", owner.toString(), character.characterId().toString(), "").isEmpty());
     run("legacy", "assign", owner.toString(), character.characterId().toString());
-    server.getScheduler().performTicks(100);
+    server.getScheduler().performOneTick();
+    assertTrue(tab("legacy", "assign", "").contains(owner.toString()));
+    server.getScheduler().performOneTick();
     assertEquals(List.of(stranger.toString()), tab("legacy", "assign", ""));
     assertTrue(tab("legacy", "assign", owner.toString(), "").isEmpty());
   }

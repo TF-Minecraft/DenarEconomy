@@ -24,6 +24,9 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 
@@ -46,46 +49,73 @@ import net.tfminecraft.denareconomy.loaders.CoinLoader;
 import net.tfminecraft.denareconomy.loaders.MessageLoader;
 import net.tfminecraft.denareconomy.event.PlayerBankPulseEvent;
 
-public class CommandManager implements CommandExecutor, TabCompleter {
+public class CommandManager implements CommandExecutor, TabCompleter, Listener {
 
     public String cmd1 = "deco";
     public String cmd2 = "pouch";
 
     private static final int HISTORY_LIMIT = 20;
+    private static final int COMPLETION_TTL_TICKS = 100;
     private static final DateTimeFormatter HISTORY_TIME =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneOffset.UTC);
 
     private List<String> characterCandidates = List.of();
     private List<String> ledgerCandidates = List.of();
     private Map<String, List<String>> legacyCandidates = Map.of();
+    private final Set<UUID> savedOwners = new HashSet<>();
+    private boolean savedOwnersDiscovered;
+    private Plugin completionPlugin;
+    private int completionRefreshTick;
+    private boolean completionDirty = true;
+    private boolean completionRefreshQueued;
 
+    /** Binds lazy snapshot warming to the plugin without scheduling idle work. */
     public void startCompletionRefresh(Plugin plugin) {
-        Set<UUID> owners = new HashSet<>();
-        for (org.bukkit.OfflinePlayer player : Bukkit.getOfflinePlayers()) owners.add(player.getUniqueId());
-        Runnable refresh = () -> refreshCompletions(owners);
-        refresh.run();
-        plugin.getServer().getScheduler().runTaskTimer(plugin, refresh, 100L, 100L);
+        completionPlugin = plugin;
+        plugin.getServer().getPluginManager().registerEvents(this, plugin);
     }
 
-    private void refreshCompletions(Set<UUID> owners) {
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        savedOwners.add(event.getPlayer().getUniqueId());
+        completionDirty = true;
+    }
+
+    private void requestCompletionRefresh() {
+        if (completionRefreshQueued || (!completionDirty
+                && Bukkit.getCurrentTick() - completionRefreshTick < COMPLETION_TTL_TICKS)) return;
+        completionRefreshQueued = true;
+        completionPlugin.getServer().getScheduler().runTask(completionPlugin, () -> {
+            completionRefreshQueued = false;
+            refreshCompletions();
+            completionRefreshTick = Bukkit.getCurrentTick();
+            completionDirty = false;
+        });
+    }
+
+    private void refreshCompletions() {
         // Ledger queries and saved-player discovery stay outside tab handling.
+        if (!savedOwnersDiscovered) {
+            for (org.bukkit.OfflinePlayer player : Bukkit.getOfflinePlayers()) savedOwners.add(player.getUniqueId());
+            savedOwnersDiscovered = true;
+        }
+        Set<UUID> owners = savedOwners;
         Ledger ledger = DenarEconomy.getLedger();
         Set<String> accounts = new TreeSet<>(List.of(AccountIds.MINT, AccountIds.TAX_VOID));
         Map<UUID, CharacterInfo> characters = new LinkedHashMap<>();
         Set<UUID> ledgerCharacters = new HashSet<>();
+        Set<UUID> unclaimed = new HashSet<>();
         for (String kind : List.of("char", "legacy", "guild", "guildtax", "server")) {
             for (Ledger.Row row : ledger.accounts(kind)) {
                 accounts.add(row.id());
-                if (row.character() != null) {
-                    ledgerCharacters.add(UUID.fromString(row.character()));
+                if (row.character() != null && ledgerCharacters.add(UUID.fromString(row.character()))) {
                     Characters.info(UUID.fromString(row.character()))
                             .ifPresent(info -> characters.put(info.ref().characterId(), info));
                 }
+                if (kind.equals("legacy") && row.cents() != 0) unclaimed.add(UUID.fromString(row.owner()));
             }
         }
-        Map<UUID, LegacyMigration.Unclaimed> unclaimed = new LegacyMigration(ledger,
-                DenarEconomy.plugin.getDataFolder(), DenarEconomy.plugin.getLogger()).unclaimed();
-        owners.addAll(unclaimed.keySet());
+        owners.addAll(unclaimed);
         Bukkit.getOnlinePlayers().forEach(player -> owners.add(player.getUniqueId()));
         characters.values().forEach(info -> owners.add(info.ref().ownerId()));
         for (UUID owner : owners) {
@@ -98,7 +128,7 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             names.add(info.ref().characterId().toString());
         });
         Map<String, List<String>> legacy = new LinkedHashMap<>();
-        unclaimed.keySet().forEach(owner -> legacy.put(owner.toString(), characters.values().stream()
+        unclaimed.forEach(owner -> legacy.put(owner.toString(), characters.values().stream()
                 .filter(info -> info.ref().ownerId().equals(owner)).map(info -> info.ref().characterId().toString())
                 .sorted().toList()));
         characterCandidates = List.copyOf(names);
@@ -257,6 +287,7 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             MessageLoader.send(sender, "errors.give-failed", "player", name);
             return;
         }
+        completionDirty = true;
 
         BigDecimal amount = MoneyManager.denars(cents);
         DenarEconomy.plugin.getLogger().info(sender.getName() + " gave " + amount + " to " + name
@@ -319,6 +350,7 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             MessageLoader.send(sender, "legacy.failed", "account", account, "result", result);
             return;
         }
+        completionDirty = true;
         DenarEconomy.plugin.getLogger().info(sender.getName() + " assigned legacy money of " + account
                 + " to character " + characterId);
         MessageLoader.send(sender, "legacy.assigned", "account", account, "character", characterId);
@@ -458,6 +490,7 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             MessageLoader.send(sender, "move.failed", "result", result);
             return;
         }
+        completionDirty = true;
         BigDecimal amount = MoneyManager.denars(cents);
         DenarEconomy.plugin.getLogger().info(sender.getName() + " moved " + amount + " from " + from + " to " + to
                 + " (" + opId + "): " + note);
@@ -689,13 +722,16 @@ public class CommandManager implements CommandExecutor, TabCompleter {
                 if (args[0].equalsIgnoreCase("history") && args.length == 2) {
                     completions.addAll(onlineCharacterNames());
                 } else if (args[0].equalsIgnoreCase("account")) {
+                    requestCompletionRefresh();
                     return characterCompletions(args);
                 } else if (args[0].equalsIgnoreCase("move") && args.length <= 3) {
+                    requestCompletionRefresh();
                     completions.addAll(ledgerCandidates);
                 } else if (args[0].equalsIgnoreCase("legacy")) {
                     if (args.length == 2) {
                         completions.add("assign");
                     } else if (args[1].equalsIgnoreCase("assign")) {
+                        if (args.length <= 4) requestCompletionRefresh();
                         if (args.length == 3) completions.addAll(legacyCandidates.keySet().stream().sorted().toList());
                         if (args.length == 4) completions.addAll(legacyCandidates.getOrDefault(args[2].toLowerCase(Locale.ROOT), List.of()));
                     }
