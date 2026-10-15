@@ -85,5 +85,6 @@ move:
 
 money:
   earned: "#dbaf1d+#b39122%amount%#dbaf1dd"
+  earned-taxed: "#dbaf1d+#b39122%amount%#dbaf1dd #44524f(after %tax%d tax)"
   tax: "#44524f(%tax% in tax)"
   coin-name: "#b39122%amount%#dbaf1dd"
