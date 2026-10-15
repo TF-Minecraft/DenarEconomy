@@ -22,6 +22,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.world.ChunkUnloadEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.meta.BundleMeta;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -137,6 +138,37 @@ class MoneyDisplayTest {
     when(stand.isDead()).thenReturn(true);
     follow.run();
     verify(stand, times(1)).teleport(any(Location.class));
+  }
+
+  @Test
+  void countsWithdrawableCoinsStoredInBundlesIncludingNestedBundles() {
+    Money.fund(Denars.pouch(character), 100);
+    ItemStack bundled = stack(Material.GOLD_NUGGET, 2);
+    ItemStack nested = stack(Material.GOLD_NUGGET, 1);
+    ItemStack locked = stack(Material.IRON_NUGGET, 4);
+    ItemStack ordinary = stack(Material.STONE, 1);
+    Coin coin = mock(Coin.class);
+    when(coin.canWithdraw()).thenReturn(true);
+    when(coin.getValue()).thenReturn(2.5);
+    doReturn(coin).when(money).getCoin(bundled);
+    doReturn(coin).when(money).getCoin(nested);
+    Coin blocked = mock(Coin.class);
+    doReturn(blocked).when(money).getCoin(locked);
+    doReturn(null).when(money).getCoin(ordinary);
+    ItemStack innerBundle = bundleStack(nested);
+    ItemStack outerBundle = bundleStack(bundled, locked, ordinary, innerBundle);
+    ItemStack emptyBundle = bundleStack();
+    doReturn(null).when(money).getCoin(innerBundle);
+    doReturn(null).when(money).getCoin(outerBundle);
+    doReturn(null).when(money).getCoin(emptyBundle);
+    when(player.getInventory().getContents())
+        .thenReturn(new ItemStack[] {outerBundle, emptyBundle});
+    messages
+        .when(() -> MessageLoader.get("pouch.hologram", "amount", String.format("%.2f", 8.5)))
+        .thenReturn("8.50 Denars");
+    money.showPouch(player);
+    messages.verify(() -> MessageLoader.send(player, "pouch.showing", "amount", 8.5));
+    verify(stand).setCustomName("8.50 Denars");
   }
 
   @Test
@@ -269,6 +301,15 @@ class MoneyDisplayTest {
     ItemStack stack = mock(ItemStack.class);
     when(stack.getType()).thenReturn(material);
     when(stack.getAmount()).thenReturn(amount);
+    return stack;
+  }
+
+  private static ItemStack bundleStack(ItemStack... contents) {
+    ItemStack stack = stack(Material.BUNDLE, 1);
+    BundleMeta meta = mock(BundleMeta.class);
+    when(meta.hasItems()).thenReturn(contents.length > 0);
+    when(meta.getItems()).thenReturn(new ArrayList<>(Arrays.asList(contents)));
+    when(stack.getItemMeta()).thenReturn(meta);
     return stack;
   }
 

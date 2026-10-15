@@ -37,6 +37,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.world.ChunkUnloadEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.BundleMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
@@ -88,6 +89,19 @@ public class MoneyManager implements Listener{
 	public double combinedValue(Coin c, ItemStack i) {
 		double v = c.getValue()*100.0*i.getAmount();
 		return Math.round(v)/100.0;
+	}
+
+	/** Withdrawable coin value of a carried stack, including coins stored inside bundles. */
+	private double carriedCoinValue(ItemStack i) {
+		if (i == null || i.getType() == Material.AIR) return 0;
+		Coin c = getCoin(i);
+		if (c != null && c.canWithdraw()) return combinedValue(c, i);
+		if (i.getItemMeta() instanceof BundleMeta bundle && bundle.hasItems()) {
+			double total = 0;
+			for (ItemStack stored : bundle.getItems()) total += carriedCoinValue(stored);
+			return total;
+		}
+		return 0;
 	}
 	
 	/** Retains the existing API; invalid amounts and unfunded transfers are ignored. */
@@ -162,10 +176,7 @@ public class MoneyManager implements Listener{
 		double inv = 0;
 
 		for (ItemStack i : p.getInventory().getContents()) {
-			if (i == null || i.getType() == Material.AIR) continue;
-			Coin c = getCoin(i);
-			if (c == null || !c.canWithdraw()) continue;
-			inv += combinedValue(c, i);
+			inv += carriedCoinValue(i);
 		}
 
 		a += inv;
