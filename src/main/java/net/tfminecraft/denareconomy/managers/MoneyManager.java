@@ -21,6 +21,7 @@ import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Item;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -246,11 +247,17 @@ public class MoneyManager implements Listener{
 			boolean silent, boolean taxable) {
 		long tax = taxable ? Denars.taxFor(character, cents) : 0;
 		Result result = Denars.earn(opId, character, account, cents, taxable);
-		if (result == Result.APPLIED && !silent) {
-			MessageLoader.send(p, "money.earned", "amount", denars(cents - tax));
-			if (tax > 0) MessageLoader.send(p, "money.tax", "tax", denars(tax));
-		}
+		if (result == Result.APPLIED && !silent) tellEarned(p, cents - tax, tax);
 		return result;
+	}
+
+	/** One chat line with what reached the account and, when some was withheld, the tax. */
+	public static void tellEarned(CommandSender to, long netCents, long taxCents) {
+		if (taxCents > 0) {
+			MessageLoader.send(to, "money.earned-taxed", "amount", denars(netCents), "tax", denars(taxCents));
+		} else {
+			MessageLoader.send(to, "money.earned", "amount", denars(netCents));
+		}
 	}
 	
 	public List<ItemStack> amountToItems(double amount) {

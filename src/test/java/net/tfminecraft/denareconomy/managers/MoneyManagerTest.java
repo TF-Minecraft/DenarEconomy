@@ -422,8 +422,11 @@ class MoneyManagerTest {
     verify(item).remove();
     assertEquals(27, pouch());
     assertEquals(3, Denars.balance(holding));
-    messages.verify(() -> MessageLoader.send(player, "money.earned", "amount", new BigDecimal("0.27")));
-    messages.verify(() -> MessageLoader.send(player, "money.tax", "tax", new BigDecimal("0.03")));
+    messages.verify(
+        () ->
+            MessageLoader.send(
+                player, "money.earned-taxed", "amount", new BigDecimal("0.27"), "tax", new BigDecimal("0.03")));
+    messages.verify(() -> MessageLoader.send(eq(player), eq("money.tax"), any(Object[].class)), never());
 
     // The zero-value companions of a payout are simply removed.
     ItemStack companion = new ItemStack(Material.GOLD_NUGGET, 3);
@@ -463,7 +466,8 @@ class MoneyManagerTest {
     money.pickupCoin(new EntityPickupItemEvent(player, coinEntity(first), 0));
     assertEquals(1357, pouch());
     messages.verify(
-        () -> MessageLoader.send(eq(player), eq("money.earned"), any(Object[].class)), times(1));
+        () -> MessageLoader.send(eq(player), eq("money.earned-taxed"), any(Object[].class)), times(1));
+    messages.verify(() -> MessageLoader.send(eq(player), eq("money.earned"), any(Object[].class)), never());
   }
 
   @Test
