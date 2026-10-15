@@ -6,9 +6,13 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -21,6 +25,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
 
 import net.tfminecraft.tlibs.character.CharacterInfo;
 import net.tfminecraft.tlibs.character.CharacterRef;
@@ -49,6 +54,57 @@ public class CommandManager implements CommandExecutor, TabCompleter {
     private static final int HISTORY_LIMIT = 20;
     private static final DateTimeFormatter HISTORY_TIME =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneOffset.UTC);
+
+    private List<String> characterCandidates = List.of();
+    private List<String> ledgerCandidates = List.of();
+    private Map<String, List<String>> legacyCandidates = Map.of();
+
+    public void startCompletionRefresh(Plugin plugin) {
+        Set<UUID> owners = new HashSet<>();
+        for (org.bukkit.OfflinePlayer player : Bukkit.getOfflinePlayers()) owners.add(player.getUniqueId());
+        Runnable refresh = () -> refreshCompletions(owners);
+        refresh.run();
+        plugin.getServer().getScheduler().runTaskTimer(plugin, refresh, 100L, 100L);
+    }
+
+    private void refreshCompletions(Set<UUID> owners) {
+        // Ledger queries and saved-player discovery stay outside tab handling.
+        Ledger ledger = DenarEconomy.getLedger();
+        Set<String> accounts = new TreeSet<>(List.of(AccountIds.MINT, AccountIds.TAX_VOID));
+        Map<UUID, CharacterInfo> characters = new LinkedHashMap<>();
+        Set<UUID> ledgerCharacters = new HashSet<>();
+        for (String kind : List.of("char", "legacy", "guild", "guildtax", "server")) {
+            for (Ledger.Row row : ledger.accounts(kind)) {
+                accounts.add(row.id());
+                if (row.character() != null) {
+                    ledgerCharacters.add(UUID.fromString(row.character()));
+                    Characters.info(UUID.fromString(row.character()))
+                            .ifPresent(info -> characters.put(info.ref().characterId(), info));
+                }
+            }
+        }
+        Map<UUID, LegacyMigration.Unclaimed> unclaimed = new LegacyMigration(ledger,
+                DenarEconomy.plugin.getDataFolder(), DenarEconomy.plugin.getLogger()).unclaimed();
+        owners.addAll(unclaimed.keySet());
+        Bukkit.getOnlinePlayers().forEach(player -> owners.add(player.getUniqueId()));
+        characters.values().forEach(info -> owners.add(info.ref().ownerId()));
+        for (UUID owner : owners) {
+            Characters.characters(owner).orElse(List.of())
+                    .forEach(info -> characters.put(info.ref().characterId(), info));
+        }
+        Set<String> names = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        characters.values().forEach(info -> {
+            if (info.alive() || ledgerCharacters.contains(info.ref().characterId())) names.add(info.name());
+            names.add(info.ref().characterId().toString());
+        });
+        Map<String, List<String>> legacy = new LinkedHashMap<>();
+        unclaimed.keySet().forEach(owner -> legacy.put(owner.toString(), characters.values().stream()
+                .filter(info -> info.ref().ownerId().equals(owner)).map(info -> info.ref().characterId().toString())
+                .sorted().toList()));
+        characterCandidates = List.copyOf(names);
+        ledgerCandidates = List.copyOf(accounts);
+        legacyCandidates = Map.copyOf(legacy);
+    }
 
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
@@ -579,11 +635,22 @@ public class CommandManager implements CommandExecutor, TabCompleter {
 
     private static List<String> giveCompletions(int position) {
         return switch (position) {
-            case 2 -> List.of("<player>");
-            case 3 -> List.of("<amount>");
+            case 2 -> onlineCharacterNames();
             case 4 -> List.of("bank", "pouch");
             default -> List.of();
         };
+    }
+
+    private static List<String> onlineCharacterNames() {
+        return Bukkit.getOnlinePlayers().stream().filter(player -> Denars.active(player).isPresent())
+                .map(Player::getName).sorted(String.CASE_INSENSITIVE_ORDER).toList();
+    }
+
+    private List<String> characterCompletions(String[] args) {
+        String prefix = String.join(" ", Arrays.copyOfRange(args, 1, args.length)).toLowerCase(Locale.ROOT);
+        int previous = args.length == 2 ? 0 : String.join(" ", Arrays.copyOfRange(args, 1, args.length - 1)).length() + 1;
+        return characterCandidates.stream().filter(value -> value.toLowerCase(Locale.ROOT).startsWith(prefix))
+                .map(value -> value.substring(previous)).toList();
     }
 
     private void sendError(Player p) {
@@ -618,16 +685,23 @@ public class CommandManager implements CommandExecutor, TabCompleter {
                 if (canGive(sender)) {
                     completions.addAll(giveCompletions(args.length));
                 }
-            } else if (args.length == 2 && args[0].equalsIgnoreCase("legacy")) {
-                if (canAdminister(sender)) {
-                    completions.add("assign");
+            } else if (args.length > 1 && canAdminister(sender)) {
+                if (args[0].equalsIgnoreCase("history") && args.length == 2) {
+                    completions.addAll(onlineCharacterNames());
+                } else if (args[0].equalsIgnoreCase("account")) {
+                    return characterCompletions(args);
+                } else if (args[0].equalsIgnoreCase("move") && args.length <= 3) {
+                    completions.addAll(ledgerCandidates);
+                } else if (args[0].equalsIgnoreCase("legacy")) {
+                    if (args.length == 2) {
+                        completions.add("assign");
+                    } else if (args[1].equalsIgnoreCase("assign")) {
+                        if (args.length == 3) completions.addAll(legacyCandidates.keySet().stream().sorted().toList());
+                        if (args.length == 4) completions.addAll(legacyCandidates.getOrDefault(args[2].toLowerCase(Locale.ROOT), List.of()));
+                    }
                 }
-            } else if (args.length == 2) {
-                if (args[0].equalsIgnoreCase("pay") || args[0].equalsIgnoreCase("toitem") ||
-                    args[0].equalsIgnoreCase("deposit") || args[0].equalsIgnoreCase("withdraw")) {
-                    completions.add("<amount>");
-                }
-            } else if (args.length == 3 && args[0].equalsIgnoreCase("toitem")) {
+            }
+            if (args.length == 3 && args[0].equalsIgnoreCase("toitem")) {
                 for (Coin coin : CoinLoader.get()) {
                     if (coin.canWithdraw()) {
                         completions.add(coin.getId());
@@ -636,13 +710,13 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             }
         } else if (cmd.getName().equalsIgnoreCase(cmd2)) {
             // "pouch" has no subcommands, so nothing to suggest
-            completions = null;
+            return List.of();
         }
-        if (completions == null) return null;
+        if (args.length == 0) return List.of();
 
         // Filter completions based on current input (for better experience)
         return completions.stream()
-                .filter(c -> c.toLowerCase().startsWith(args[args.length - 1].toLowerCase()))
+                .filter(c -> c.toLowerCase(Locale.ROOT).startsWith(args[args.length - 1].toLowerCase(Locale.ROOT)))
                 .collect(Collectors.toList());
     }
 }

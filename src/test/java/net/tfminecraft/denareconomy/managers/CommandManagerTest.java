@@ -359,7 +359,7 @@ class CommandManagerTest {
             .onTabComplete(server.getConsoleSender(), deco, "deco", new String[] {""})
             .containsAll(List.of("reload", "give", "legacy", "account", "move")));
     for (String name : List.of("pay", "toitem", "deposit", "withdraw")) {
-      assertEquals(List.of("<amount>"), tab(name, ""));
+      assertEquals(List.of(), tab(name, ""));
     }
     assertEquals(List.of(), tab("bal", ""));
     assertEquals(List.of(), tab("pay", "", ""));
@@ -370,9 +370,126 @@ class CommandManagerTest {
     coins.when(CoinLoader::get).thenReturn(List.of(gold, blocked));
     assertEquals(List.of("gold"), tab("toitem", "1", "G"));
     assertEquals(List.of(), tab("topouch", ""));
-    assertNull(commands.onTabComplete(player, command("pouch"), "pouch", new String[] {""}));
+    assertEquals(List.of(), commands.onTabComplete(player, command("pouch"), "pouch", new String[] {""}));
     assertEquals(
         List.of(), commands.onTabComplete(player, command("other"), "other", new String[] {""}));
+  }
+
+  @Test
+  void targetSuggestionsRequireAnOnlineActiveCharacterAndPreserveStaffPermissions() {
+    PlayerMock amy = server.addPlayer("Amy");
+    identity.play(amy);
+    PlayerMock inactive = server.addPlayer("AbsentCharacter");
+    PlayerMock offline = server.addPlayer("AliceOffline");
+    identity.play(offline);
+    offline.disconnect();
+    assertTrue(tab("give", "").isEmpty());
+    assertTrue(tab("history", "").isEmpty());
+    player.setOp(true);
+    assertEquals(List.of("Alex", "Amy"), tab("GIVE", "a"));
+    assertEquals(List.of("Alex"), tab("give", "Al"));
+    assertEquals(List.of("Alex", "Amy"), tab("HISTORY", "A"));
+    assertTrue(tab("history", "Absent").isEmpty());
+    assertTrue(tab("history", "Alex", "").isEmpty());
+    assertTrue(tab("give", "unknown").isEmpty());
+    assertTrue(tab("give", "Alex", "").isEmpty());
+    assertTrue(tab("give", "Alex", "12").isEmpty());
+    assertEquals(List.of("Alex", "Amy"), commands.onTabComplete(server.getConsoleSender(), deco, "deco", new String[]{"give", ""}));
+    for (String verb : List.of("pay", "toitem", "deposit", "withdraw")) {
+      assertTrue(tab(verb, "").isEmpty());
+      assertTrue(tab(verb, "12").isEmpty());
+    }
+    Coin gold = coin("gold", 2, true);
+    coins.when(CoinLoader::get).thenReturn(List.of(gold));
+    assertEquals(List.of("gold"), tab("toitem", "1", "g"));
+    identity.stop(amy);
+    assertEquals(List.of("Alex"), tab("give", "a"));
+  }
+
+  @Test
+  void pouchSuppressesTheBukkitPlayerFallbackForVisibleOnlinePlayers() throws Exception {
+    server.addPlayer("VisibleOnline");
+    var constructor = org.bukkit.command.PluginCommand.class.getDeclaredConstructor(String.class, org.bukkit.plugin.Plugin.class);
+    constructor.setAccessible(true);
+    var pouch = constructor.newInstance("pouch", MockBukkit.createMockPlugin());
+    pouch.setExecutor(commands);
+    assertEquals(List.of(), pouch.tabComplete(player, "pouch", new String[]{""}));
+    assertEquals(List.of(), pouch.tabComplete(player, "pouch", new String[]{"V"}));
+  }
+
+  @Test
+  void staffCompletionsUseAuthoritativeSnapshotsAndOnlyTheRemainingNameSuffix() {
+    identity.name(character, "Marco Morales");
+    CharacterRef other = identity.character(player.getUniqueId());
+    identity.name(other, "Marco Marquez");
+    CharacterRef archived = identity.character(player.getUniqueId());
+    identity.name(archived, "Archived Owner");
+    identity.kill(archived);
+    CharacterRef dead = identity.character(UUID.randomUUID());
+    identity.name(dead, "Dead Character");
+    identity.kill(dead);
+    Money.fund(AccountIds.bank(dead.characterId()), 50);
+    UUID guild = UUID.randomUUID();
+    Money.fund(AccountIds.guild(guild), 10);
+    Money.fund(AccountIds.guildTax(guild), 20);
+    var ledger = spy(DenarEconomy.getLedger());
+    DenarEconomy.setLedger(ledger);
+    commands.startCompletionRefresh(MockBukkit.createMockPlugin());
+    clearInvocations(ledger);
+    for (String verb : List.of("history", "account", "move", "legacy")) assertTrue(tab(verb, "").isEmpty());
+    player.setOp(true);
+    assertEquals(List.of("Marco Marquez", "Marco Morales"), tab("account", "mAr"));
+    assertEquals(List.of("Marquez", "Morales"), tab("ACCOUNT", "mArCo", ""));
+    assertEquals(List.of("Morales"), tab("account", "Marco", "mO"));
+    assertEquals(List.of("Morales"), tab("account", "Marco", "Morales"));
+    assertTrue(tab("account", "Marco", "Morales", "").isEmpty());
+    assertTrue(tab("account", "not-a-character").isEmpty());
+    assertEquals(List.of(character.characterId().toString()), tab("account", character.characterId().toString()));
+    assertEquals(List.of("Dead Character"), tab("account", "dead"));
+    assertTrue(tab("account", "Archived").isEmpty());
+    assertEquals(List.of(archived.characterId().toString()), tab("account", archived.characterId().toString()));
+    assertEquals(List.of("server:mint", "server:tax-void"), tab("move", "sErVer:"));
+    assertEquals(List.of(AccountIds.bank(dead.characterId())), tab("move", AccountIds.MINT, "char:"));
+    assertTrue(tab("move", "missing").isEmpty());
+    assertEquals(List.of(AccountIds.guild(guild)), tab("move", AccountIds.MINT, "guild:"));
+    assertEquals(List.of(AccountIds.guildTax(guild)), tab("move", AccountIds.MINT, "guildtax:"));
+    assertTrue(tab("move", AccountIds.MINT, AccountIds.bank(dead.characterId()), "").isEmpty());
+    assertTrue(tab("move", AccountIds.MINT, AccountIds.bank(dead.characterId()), "1", "").isEmpty());
+    verify(ledger, never()).accounts(anyString());
+    verify(ledger, never()).history(anyList(), anyInt());
+    verify(ledger, never()).balance(anyString());
+    identity.name(character, "Renamed Character");
+    server.getScheduler().performTicks(100);
+    assertEquals(List.of("Renamed Character"), tab("account", "renamed"));
+    assertTrue(tab("account", "Marco", "Mor").isEmpty());
+    assertTrue(ledger.isOpen());
+  }
+
+  @Test
+  void legacyIdsAreLimitedToUnclaimedAccountsAndTheirOwnCharactersAndRefreshAfterClaim() {
+    player.setOp(true);
+    UUID owner = player.getUniqueId();
+    UUID stranger = UUID.randomUUID();
+    CharacterRef sameOwner = identity.character(owner);
+    CharacterRef foreign = identity.character(stranger);
+    Money.fund(AccountIds.legacyPouch(owner), 20);
+    Money.fund(AccountIds.legacyBank(stranger), 30);
+    commands.startCompletionRefresh(MockBukkit.createMockPlugin());
+    assertEquals(List.of("assign"), tab("legacy", "As"));
+    assertEquals(java.util.Set.of(owner.toString(), stranger.toString()), new java.util.HashSet<>(tab("legacy", "assign", "")));
+    assertEquals(List.of(owner.toString()), tab("LEGACY", "ASSIGN", owner.toString().substring(0, 15)));
+    assertEquals(java.util.Set.of(character.characterId().toString(), sameOwner.characterId().toString()),
+        new java.util.HashSet<>(tab("legacy", "assign", owner.toString().toUpperCase(java.util.Locale.ROOT), "")));
+    assertEquals(List.of(sameOwner.characterId().toString()), tab("legacy", "assign", owner.toString(), sameOwner.characterId().toString().substring(0, 15)));
+    assertEquals(List.of(foreign.characterId().toString()), tab("legacy", "assign", stranger.toString(), ""));
+    assertTrue(tab("legacy", "wrong", "").isEmpty());
+    assertTrue(tab("legacy", "assign", "missing", "").isEmpty());
+    assertTrue(tab("legacy", "assign", owner.toString(), "missing").isEmpty());
+    assertTrue(tab("legacy", "assign", owner.toString(), character.characterId().toString(), "").isEmpty());
+    run("legacy", "assign", owner.toString(), character.characterId().toString());
+    server.getScheduler().performTicks(100);
+    assertEquals(List.of(stranger.toString()), tab("legacy", "assign", ""));
+    assertTrue(tab("legacy", "assign", owner.toString(), "").isEmpty());
   }
 
   @Test
@@ -456,8 +573,8 @@ class CommandManagerTest {
     assertEquals(List.of(), tab("give", ""));
     player.addAttachment(MockBukkit.createMockPlugin(), "denareconomy.give", true);
     assertEquals(List.of("give"), tab("gi"));
-    assertEquals(List.of("<player>"), tab("give", ""));
-    assertEquals(List.of("<amount>"), tab("give", "Alex", ""));
+    assertEquals(List.of("Alex"), tab("give", ""));
+    assertEquals(List.of(), tab("give", "Alex", ""));
     assertEquals(List.of("bank", "pouch"), tab("give", "Alex", "5", ""));
     assertEquals(List.of("pouch"), tab("Give", "Alex", "5", "P"));
     assertEquals(List.of(), tab("give", "Alex", "5", "bank", ""));
