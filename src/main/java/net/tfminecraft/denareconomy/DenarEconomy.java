@@ -48,6 +48,7 @@ public class DenarEconomy extends JavaPlugin {
 		getCommand(commands.cmd1).setTabCompleter(commands);
 		getCommand(commands.cmd2).setTabCompleter(commands);
 		migration.start(this);
+		commands.startCompletionRefresh(this);
 		EstateSupport.start(this);
 		OfflineModifier.load();
 		for (Player p : Bukkit.getOnlinePlayers()) {
