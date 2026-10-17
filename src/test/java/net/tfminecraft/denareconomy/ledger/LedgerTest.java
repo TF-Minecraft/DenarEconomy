@@ -22,6 +22,7 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import net.tfminecraft.denareconomy.api.Leg;
 import net.tfminecraft.denareconomy.api.Result;
+import net.tfminecraft.denareconomy.api.TaxLeg;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -113,6 +114,43 @@ class LedgerTest {
     assertEquals(Result.APPLIED, move("coin:1", "earn", MINT, pouch, 100));
     assertEquals(100, ledger.balance(pouch));
     assertEquals(1, ledger.history(List.of(pouch), 20).size());
+  }
+
+  @Test
+  void addingTaxAttributionToAnOlderDatabasePreservesItsMoneyAndHistory() throws Exception {
+    UUID incarnation = UUID.randomUUID();
+    String holding = AccountIds.guildTax(incarnation);
+    assertEquals(Result.APPLIED, move("legacy-tax", "earn", MINT, holding, 1234));
+    ledger.close();
+    try (Connection connection = direct(); Statement statement = connection.createStatement()) {
+      statement.execute("DROP TABLE tax_earnings");
+    }
+    ledger = open();
+    assertEquals(1234, ledger.balance(holding));
+    assertEquals(Optional.of(Result.APPLIED), ledger.status("legacy-tax"));
+    assertEquals("legacy-tax", ledger.history(List.of(holding), 10).getFirst().opId());
+    assertTrue(ledger.taxContributors(incarnation).isEmpty());
+  }
+
+  @Test
+  void failingToSaveTaxAttributionRollsBackTheWholePayment() throws Exception {
+    UUID incarnation = UUID.randomUUID();
+    UUID earner = UUID.randomUUID();
+    String holding = AccountIds.guildTax(incarnation);
+    String pouch = AccountIds.pouch(earner);
+    try (Connection connection = direct(); Statement statement = connection.createStatement()) {
+      statement.execute("CREATE TRIGGER fail_tax BEFORE INSERT ON tax_earnings BEGIN SELECT RAISE(ABORT, 'test'); END");
+    }
+    assertEquals(Result.UNAVAILABLE, ledger.postEarning("tax", "earn",
+        List.of(new Leg(MINT, -100), new Leg(pouch, 90), new Leg(holding, 10)),
+        earner, new TaxLeg(holding, 10)));
+    assertFalse(ledger.isOpen());
+    ledger = open();
+    assertEquals(0, ledger.balance(MINT));
+    assertEquals(0, ledger.balance(pouch));
+    assertEquals(0, ledger.balance(holding));
+    assertEquals(Optional.empty(), ledger.status("tax"));
+    assertTrue(ledger.taxContributors(incarnation).isEmpty());
   }
 
   @Test

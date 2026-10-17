@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import net.tfminecraft.denareconomy.event.PlayerEarnMoneyEvent;
@@ -167,7 +168,8 @@ class DenarsTest {
 
   @Test
   void taxableEarningsPostTheTaxLegInTheSameOperation() {
-    String holding = Denars.guildTax(UUID.randomUUID());
+    UUID incarnation = UUID.randomUUID();
+    String holding = Denars.guildTax(incarnation);
     taxAt(25, holding);
     assertEquals(250, Denars.taxFor(character, 1000));
     assertEquals(Result.APPLIED, Denars.earn("e", character, Denars.pouch(character), 1000, true));
@@ -175,9 +177,60 @@ class DenarsTest {
     assertEquals(250, Denars.balance(holding));
     assertEquals(-1000, Denars.balance(Denars.MINT));
     assertEquals(1, earned.size());
+    assertEquals(Map.of(character.characterId(), 250L), Denars.taxContributors(incarnation));
     // A retry applies nothing more.
     assertEquals(Result.APPLIED, Denars.earn("e", character, Denars.pouch(character), 1000, true));
     assertEquals(750, Denars.balance(Denars.pouch(character)));
+    assertEquals(Map.of(character.characterId(), 250L), Denars.taxContributors(incarnation));
+    assertEquals(Result.CONFLICT, Denars.earn("e", character, Denars.pouch(character), 2000, true));
+    assertEquals(Map.of(character.characterId(), 250L), Denars.taxContributors(incarnation));
+  }
+
+  @Test
+  void taxContributorsFollowCharactersRatherThanTheirOwnersOrActiveSessions() {
+    UUID incarnation = UUID.randomUUID();
+    String holding = Denars.guildTax(incarnation);
+    taxAt(25, holding);
+    CharacterRef other = identity.character(character.ownerId());
+    identity.start(player, other);
+    assertEquals(Result.APPLIED, Denars.earn("first", character, Denars.bank(character), 1000, true));
+    assertEquals(Result.APPLIED, Denars.earn("second", character, Denars.pouch(character), 400, true));
+    assertEquals(Result.APPLIED, Denars.earn("other", other, Denars.bank(other), 800, true));
+    assertEquals(Map.of(character.characterId(), 350L, other.characterId(), 200L), Denars.taxContributors(incarnation));
+    assertTrue(Denars.taxContributors(UUID.randomUUID()).isEmpty());
+  }
+
+  @Test
+  void taxAttributionSurvivesRestartAndEndsWhenHeldTaxIsWithdrawn() {
+    UUID incarnation = UUID.randomUUID();
+    String holding = Denars.guildTax(incarnation);
+    taxAt(100, holding);
+    Money.fund(holding, 50); // Older credits have no contributor identity.
+    assertEquals(Result.APPLIED, Denars.earn("first", character, Denars.pouch(character), 100, true));
+    assertEquals(0, Denars.balance(Denars.pouch(character)));
+    Money.close();
+    Money.open(folder);
+    assertEquals(150, Denars.balance(holding));
+    assertEquals(Map.of(character.characterId(), 100L), Denars.taxContributors(incarnation));
+    assertEquals(Result.APPLIED, Denars.transfer("settle", "settle", holding, Denars.guild(incarnation), 150));
+    assertTrue(Denars.taxContributors(incarnation).isEmpty());
+    // Retrying yesterday's payment cannot create a contributor in the new day.
+    assertEquals(Result.APPLIED, Denars.earn("first", character, Denars.pouch(character), 100, true));
+    assertTrue(Denars.taxContributors(incarnation).isEmpty());
+    assertEquals(Result.APPLIED, Denars.earn("next", character, Denars.bank(character), 200, true));
+    assertEquals(Map.of(character.characterId(), 200L), Denars.taxContributors(incarnation));
+    // Partial staff withdrawals leave residual money unattributed rather than inventing a split.
+    assertEquals(Result.APPLIED, Denars.transfer("adjust", "staff:adjust", holding, Denars.MINT, 1));
+    assertEquals(199, Denars.balance(holding));
+    assertTrue(Denars.taxContributors(incarnation).isEmpty());
+  }
+
+  @Test
+  void zeroTaxDoesNotCreateAContributor() {
+    UUID incarnation = UUID.randomUUID();
+    taxAt(0, Denars.guildTax(incarnation));
+    assertEquals(Result.APPLIED, Denars.earn("zero", character, Denars.pouch(character), 100, true));
+    assertTrue(Denars.taxContributors(incarnation).isEmpty());
   }
 
   @Test
@@ -207,13 +260,15 @@ class DenarsTest {
   void tradesPayTheSellerNetOfTaxAndRefuseAnUnfundedBuyer() {
     Player seller = server.addPlayer("Sam");
     CharacterRef shopkeeper = identity.play(seller);
-    String holding = Denars.guildTax(UUID.randomUUID());
+    UUID incarnation = UUID.randomUUID();
+    String holding = Denars.guildTax(incarnation);
     taxAt(10, holding);
     String buyer = Denars.pouch(character);
     assertEquals(
         Result.REFUSED,
         Denars.trade("shop:1", "shop", buyer, shopkeeper, Denars.bank(shopkeeper), 500, true));
     assertTrue(earned.isEmpty());
+    assertTrue(Denars.taxContributors(incarnation).isEmpty());
     Money.fund(buyer, 1000);
     assertEquals(
         Result.APPLIED,
@@ -227,6 +282,7 @@ class DenarsTest {
         Denars.trade("shop:3", "shop", buyer, shopkeeper, Denars.bank(shopkeeper), 500, false));
     assertEquals(950, Denars.balance(Denars.bank(shopkeeper)));
     assertEquals(1, earned.size());
+    assertEquals(Map.of(shopkeeper.characterId(), 50L), Denars.taxContributors(incarnation));
   }
 
   @Test
@@ -237,6 +293,7 @@ class DenarsTest {
     assertTrue(earned.isEmpty());
     assertEquals(0, Denars.balance(Denars.pouch(character)));
     assertEquals(Optional.empty(), Denars.status("e"));
+    assertTrue(Denars.taxContributors(UUID.randomUUID()).isEmpty());
   }
 
   @Test
@@ -271,6 +328,7 @@ class DenarsTest {
             Denars::taxReady,
             () -> Denars.active(player),
             () -> Denars.balance(pouch),
+            () -> Denars.taxContributors(character.characterId()),
             () -> Denars.post("p", "r", List.of(new Leg(Denars.MINT, -1), new Leg(pouch, 1))),
             () -> Denars.transfer("t", "r", Denars.MINT, pouch, 1),
             () -> Denars.status("t"),

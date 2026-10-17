@@ -6,7 +6,7 @@
 
     <groupId>net.tfminecraft</groupId>
     <artifactId>denareconomy</artifactId>
-    <version>main-SNAPSHOT</version>
+    <version>0.7.0</version>
 
     <name>DenarEconomy</name>
     <url>tfminecraft.net</url>
