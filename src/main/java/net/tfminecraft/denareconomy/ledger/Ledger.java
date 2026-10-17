@@ -139,7 +139,7 @@ public final class Ledger {
 		return postEarning(opId, reason, legs, null, null);
 	}
 
-	/** Posts an earning and its guild tax attribution in one transaction. */
+	/** Posts an earning and its guild tax attribution in one transaction. Tax must match its net credit. */
 	public Result postEarning(String opId, String reason, List<Leg> legs, UUID earner, TaxLeg tax) {
 		requireText(opId, "operation ID");
 		requireText(reason, "reason");
@@ -148,6 +148,12 @@ public final class Ledger {
 			return Result.UNAVAILABLE;
 		}
 		Prepared prepared = prepare(opId, reason, legs);
+		if (tax != null && tax.cents() > 0 && AccountIds.parse(tax.account()).kind().equals("guildtax")) {
+			if (earner == null || prepared.changes() == null
+					|| prepared.changes().getOrDefault(tax.account(), 0L) != tax.cents()) {
+				throw new IllegalArgumentException("Guild tax attribution must match the earning character and posting credit");
+			}
+		}
 		return run("posting " + opId, Result.UNAVAILABLE, connection -> {
 			connection.setAutoCommit(false);
 			Result result = apply(connection, opId, reason, prepared.fingerprint(), prepared.changes(), earner, tax);
@@ -317,10 +323,10 @@ public final class Ledger {
 			Map<String, Long> changes, UUID earner, TaxLeg tax) throws SQLException {
 		String[] stored = stored(connection, opId);
 		if (stored != null) {
-			if (stored[0].equals(fingerprint)) {
+			if (stored[0].equals(fingerprint) && sameTaxAttribution(connection, opId, earner, tax)) {
 				return Result.valueOf(stored[1]);
 			}
-			log.warning("Operation " + opId + " was posted again with different legs; its first result stands");
+			log.warning("Operation " + opId + " was posted again with different legs or tax attribution; its first result stands");
 			return Result.CONFLICT;
 		}
 		Map<String, Long> after = changes == null ? null : balancesAfter(connection, reason, changes);
@@ -458,6 +464,17 @@ public final class Ledger {
 			query.setString(1, opId);
 			ResultSet row = query.executeQuery();
 			return row.next() ? new String[] {row.getString(1), row.getString(2)} : null;
+		}
+	}
+
+	private static boolean sameTaxAttribution(Connection connection, String opId, UUID earner, TaxLeg tax) throws SQLException {
+		try (PreparedStatement query = connection.prepareStatement("SELECT character, account FROM tax_earnings WHERE op_id = ?")) {
+			query.setString(1, opId);
+			try (ResultSet row = query.executeQuery()) {
+				// Older postings have no attribution; preserve their existing retry result.
+				return !row.next() || earner != null && earner.toString().equals(row.getString(1))
+						&& tax != null && tax.account().equals(row.getString(2));
+			}
 		}
 	}
 

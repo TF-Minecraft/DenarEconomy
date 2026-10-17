@@ -154,6 +154,46 @@ class LedgerTest {
   }
 
   @Test
+  void taxAttributionMustMatchTheCharacterAndNetHoldingCredit() {
+    UUID incarnation = UUID.randomUUID();
+    UUID earner = UUID.randomUUID();
+    String holding = AccountIds.guildTax(incarnation);
+    List<Leg> legs = List.of(new Leg(MINT, -100), new Leg(AccountIds.pouch(earner), 90), new Leg(holding, 10));
+    assertThrows(IllegalArgumentException.class,
+        () -> ledger.postEarning("tax", "earn", legs, earner, new TaxLeg(holding, 11)));
+    assertThrows(IllegalArgumentException.class,
+        () -> ledger.postEarning("tax", "earn", legs, earner, new TaxLeg(AccountIds.guildTax(UUID.randomUUID()), 10)));
+    assertThrows(IllegalArgumentException.class,
+        () -> ledger.postEarning("tax", "earn", legs, null, new TaxLeg(holding, 10)));
+    assertThrows(IllegalArgumentException.class,
+        () -> ledger.postEarning("tax", "earn", List.of(new Leg(MINT, Long.MIN_VALUE),
+            new Leg(holding, Long.MAX_VALUE), new Leg(holding, 1)), earner, new TaxLeg(holding, 10)));
+    assertEquals(Optional.empty(), ledger.status("tax"));
+    assertEquals(0, ledger.balance(holding));
+    assertTrue(ledger.taxContributors(incarnation).isEmpty());
+  }
+
+  @Test
+  void attributedRetriesCannotChangeTheEarnerOrTaxAccount() {
+    UUID first = UUID.randomUUID(), second = UUID.randomUUID(), earner = UUID.randomUUID();
+    String holding = AccountIds.guildTax(first), other = AccountIds.guildTax(second);
+    List<Leg> legs = List.of(new Leg(MINT, -200), new Leg(holding, 100), new Leg(other, 100));
+    TaxLeg tax = new TaxLeg(holding, 100);
+    assertEquals(Result.APPLIED, ledger.postEarning("tax", "earn", legs, earner, tax));
+    assertEquals(Result.CONFLICT, ledger.postEarning("tax", "earn", legs, UUID.randomUUID(), tax));
+    assertEquals(Result.CONFLICT, ledger.postEarning("tax", "earn", legs, earner, null));
+    assertEquals(Result.CONFLICT, ledger.post("tax", "earn", legs));
+    assertEquals(Result.CONFLICT, ledger.postEarning("tax", "earn", legs, earner, new TaxLeg(other, 100)));
+    assertEquals(Result.APPLIED, ledger.postEarning("tax", "earn", legs, earner, tax));
+    assertEquals(Map.of(earner, 100L), ledger.taxContributors(first));
+    assertTrue(ledger.taxContributors(second).isEmpty());
+    // The same legs from an older provider still retain their saved result without invented names.
+    assertEquals(Result.APPLIED, ledger.post("legacy", "earn", legs));
+    assertEquals(Result.APPLIED, ledger.postEarning("legacy", "earn", legs, earner, tax));
+    assertEquals(Map.of(earner, 100L), ledger.taxContributors(first));
+  }
+
+  @Test
   void reusingAnOperationIdWithDifferentLegsIsAConflict() {
     String pouch = pouch();
     assertEquals(Result.APPLIED, move("op", "earn", MINT, pouch, 100));
