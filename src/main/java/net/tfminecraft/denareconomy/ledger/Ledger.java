@@ -24,6 +24,7 @@ import org.bukkit.Bukkit;
 
 import net.tfminecraft.denareconomy.api.Leg;
 import net.tfminecraft.denareconomy.api.Result;
+import net.tfminecraft.denareconomy.api.TaxLeg;
 import net.tfminecraft.tlibs.character.CharacterStatus;
 import net.tfminecraft.tlibs.character.Characters;
 import net.tfminecraft.tlibs.database.SqliteDatabase;
@@ -44,7 +45,9 @@ public final class Ledger {
 		"CREATE TABLE IF NOT EXISTS operations(op_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,"
 				+ " status TEXT NOT NULL, created INTEGER NOT NULL, reason TEXT NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS legs(op_id TEXT NOT NULL, account TEXT NOT NULL, cents INTEGER NOT NULL)",
-		"CREATE INDEX IF NOT EXISTS legs_by_account ON legs(account)"
+		"CREATE INDEX IF NOT EXISTS legs_by_account ON legs(account)",
+		"CREATE TABLE IF NOT EXISTS tax_earnings(op_id TEXT PRIMARY KEY, account TEXT NOT NULL,"
+				+ " character TEXT NOT NULL, cents INTEGER NOT NULL)"
 	};
 
 	/** One stored account. */
@@ -133,6 +136,11 @@ public final class Ledger {
 	 *                                  do not sum to zero
 	 */
 	public Result post(String opId, String reason, List<Leg> legs) {
+		return postEarning(opId, reason, legs, null, null);
+	}
+
+	/** Posts an earning and its guild tax attribution in one transaction. Tax must match its net credit. */
+	public Result postEarning(String opId, String reason, List<Leg> legs, UUID earner, TaxLeg tax) {
 		requireText(opId, "operation ID");
 		requireText(reason, "reason");
 		if (reserved(opId) || reserved(reason)) {
@@ -140,9 +148,15 @@ public final class Ledger {
 			return Result.UNAVAILABLE;
 		}
 		Prepared prepared = prepare(opId, reason, legs);
+		if (tax != null && tax.cents() > 0 && AccountIds.parse(tax.account()).kind().equals("guildtax")) {
+			if (earner == null || prepared.changes() == null
+					|| prepared.changes().getOrDefault(tax.account(), 0L) != tax.cents()) {
+				throw new IllegalArgumentException("Guild tax attribution must match the earning character and posting credit");
+			}
+		}
 		return run("posting " + opId, Result.UNAVAILABLE, connection -> {
 			connection.setAutoCommit(false);
-			Result result = apply(connection, opId, reason, prepared.fingerprint(), prepared.changes());
+			Result result = apply(connection, opId, reason, prepared.fingerprint(), prepared.changes(), earner, tax);
 			connection.commit();
 			connection.setAutoCommit(true);
 			return result;
@@ -194,7 +208,7 @@ public final class Ledger {
 				// Both debits always, so a zero leg still counts in the fingerprint.
 				Prepared prepared = prepare(opId, ESTATE + deathId, List.of(new Leg(pouch, -inPouch),
 						new Leg(bank, -inBank), new Leg(recipientAccount, total)));
-				Result result = apply(connection, opId, ESTATE + deathId, prepared.fingerprint(), prepared.changes());
+				Result result = apply(connection, opId, ESTATE + deathId, prepared.fingerprint(), prepared.changes(), null, null);
 				sweep = new Sweep(result, Optional.of(opId), result == Result.APPLIED ? total : 0);
 			}
 			connection.commit();
@@ -223,6 +237,27 @@ public final class Ledger {
 	public long balance(String account) {
 		AccountIds.parse(account);
 		return run("reading " + account, 0L, connection -> balance(connection, account));
+	}
+
+	/**
+	 * Guild tax credited per character since the holding account's latest debit, in cents. A debit
+	 * ends the attribution period; any residual or older unattributed money remains in the balance.
+	 */
+	public Map<UUID, Long> taxContributors(UUID incarnation) {
+		String account = AccountIds.guildTax(incarnation);
+		return run("reading tax contributors for " + account, Map.of(), connection -> {
+			String sql = "SELECT character, SUM(cents) FROM tax_earnings WHERE account = ? AND op_id IN"
+					+ " (SELECT op_id FROM legs WHERE account = ? AND cents > 0 AND rowid > COALESCE("
+					+ " (SELECT MAX(rowid) FROM legs WHERE account = ? AND cents < 0), 0)) GROUP BY character";
+			try (PreparedStatement query = connection.prepareStatement(sql)) {
+				for (int index = 1; index <= 3; index++) query.setString(index, account);
+				Map<UUID, Long> amounts = new LinkedHashMap<>();
+				try (ResultSet row = query.executeQuery()) {
+					while (row.next()) amounts.put(UUID.fromString(row.getString(1)), row.getLong(2));
+				}
+				return Map.copyOf(amounts);
+			}
+		});
 	}
 
 	/** Every account of one kind ({@code char}, {@code legacy}, {@code guild} ...), by ID. */
@@ -285,13 +320,13 @@ public final class Ledger {
 
 	/** Records the outcome. {@code changes} is null when summing the legs overflowed. */
 	private Result apply(Connection connection, String opId, String reason, String fingerprint,
-			Map<String, Long> changes) throws SQLException {
+			Map<String, Long> changes, UUID earner, TaxLeg tax) throws SQLException {
 		String[] stored = stored(connection, opId);
 		if (stored != null) {
-			if (stored[0].equals(fingerprint)) {
+			if (stored[0].equals(fingerprint) && sameTaxAttribution(connection, opId, earner, tax)) {
 				return Result.valueOf(stored[1]);
 			}
-			log.warning("Operation " + opId + " was posted again with different legs; its first result stands");
+			log.warning("Operation " + opId + " was posted again with different legs or tax attribution; its first result stands");
 			return Result.CONFLICT;
 		}
 		Map<String, Long> after = changes == null ? null : balancesAfter(connection, reason, changes);
@@ -326,6 +361,17 @@ public final class Ledger {
 				leg.setString(2, entry.getKey());
 				leg.setLong(3, changes.get(entry.getKey()));
 				leg.executeUpdate();
+			}
+		}
+		if (earner != null && tax != null && tax.cents() > 0
+				&& AccountIds.parse(tax.account()).kind().equals("guildtax")) {
+			try (PreparedStatement insert = connection.prepareStatement(
+					"INSERT INTO tax_earnings(op_id, account, character, cents) VALUES (?, ?, ?, ?)")) {
+				insert.setString(1, opId);
+				insert.setString(2, tax.account());
+				insert.setString(3, earner.toString());
+				insert.setLong(4, tax.cents());
+				insert.executeUpdate();
 			}
 		}
 		return result;
@@ -418,6 +464,17 @@ public final class Ledger {
 			query.setString(1, opId);
 			ResultSet row = query.executeQuery();
 			return row.next() ? new String[] {row.getString(1), row.getString(2)} : null;
+		}
+	}
+
+	private static boolean sameTaxAttribution(Connection connection, String opId, UUID earner, TaxLeg tax) throws SQLException {
+		try (PreparedStatement query = connection.prepareStatement("SELECT character, account FROM tax_earnings WHERE op_id = ?")) {
+			query.setString(1, opId);
+			try (ResultSet row = query.executeQuery()) {
+				// Older postings have no attribution; preserve their existing retry result.
+				return !row.next() || earner != null && earner.toString().equals(row.getString(1))
+						&& tax != null && tax.account().equals(row.getString(2));
+			}
 		}
 	}
 

@@ -2,6 +2,7 @@ package net.tfminecraft.denareconomy.api;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -83,6 +84,15 @@ public final class Denars {
 		return DenarEconomy.getLedger().balance(account);
 	}
 
+	/**
+	 * Current held citizen tax per earning character, in cents. Excludes unattributed credits and
+	 * earnings before the holding account's latest debit. Empty when the ledger is unavailable.
+	 */
+	public static Map<UUID, Long> taxContributors(UUID incarnation) {
+		Ledger.requireMainThread();
+		return DenarEconomy.getLedger().taxContributors(incarnation);
+	}
+
 	/** Posts legs that sum to zero, all or nothing. */
 	public static Result post(String opId, String reason, List<Leg> legs) {
 		Ledger.requireMainThread();
@@ -138,7 +148,7 @@ public final class Denars {
 		}
 		legs.add(new Leg(to, cents - taxCents));
 		tax.ifPresent(leg -> legs.add(new Leg(leg.account(), leg.cents())));
-		Result result = post(opId, reason, legs);
+		Result result = DenarEconomy.getLedger().postEarning(opId, reason, legs, earner.characterId(), tax.orElse(null));
 		if (taxable && result == Result.APPLIED) {
 			Bukkit.getPluginManager().callEvent(new PlayerEarnMoneyEvent(
 					Bukkit.getOfflinePlayer(earner.ownerId()).getName(), cents / 100.0, earner));

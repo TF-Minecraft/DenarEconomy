@@ -22,6 +22,7 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import net.tfminecraft.denareconomy.api.Leg;
 import net.tfminecraft.denareconomy.api.Result;
+import net.tfminecraft.denareconomy.api.TaxLeg;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -113,6 +114,83 @@ class LedgerTest {
     assertEquals(Result.APPLIED, move("coin:1", "earn", MINT, pouch, 100));
     assertEquals(100, ledger.balance(pouch));
     assertEquals(1, ledger.history(List.of(pouch), 20).size());
+  }
+
+  @Test
+  void addingTaxAttributionToAnOlderDatabasePreservesItsMoneyAndHistory() throws Exception {
+    UUID incarnation = UUID.randomUUID();
+    String holding = AccountIds.guildTax(incarnation);
+    assertEquals(Result.APPLIED, move("legacy-tax", "earn", MINT, holding, 1234));
+    ledger.close();
+    try (Connection connection = direct(); Statement statement = connection.createStatement()) {
+      statement.execute("DROP TABLE tax_earnings");
+    }
+    ledger = open();
+    assertEquals(1234, ledger.balance(holding));
+    assertEquals(Optional.of(Result.APPLIED), ledger.status("legacy-tax"));
+    assertEquals("legacy-tax", ledger.history(List.of(holding), 10).getFirst().opId());
+    assertTrue(ledger.taxContributors(incarnation).isEmpty());
+  }
+
+  @Test
+  void failingToSaveTaxAttributionRollsBackTheWholePayment() throws Exception {
+    UUID incarnation = UUID.randomUUID();
+    UUID earner = UUID.randomUUID();
+    String holding = AccountIds.guildTax(incarnation);
+    String pouch = AccountIds.pouch(earner);
+    try (Connection connection = direct(); Statement statement = connection.createStatement()) {
+      statement.execute("CREATE TRIGGER fail_tax BEFORE INSERT ON tax_earnings BEGIN SELECT RAISE(ABORT, 'test'); END");
+    }
+    assertEquals(Result.UNAVAILABLE, ledger.postEarning("tax", "earn",
+        List.of(new Leg(MINT, -100), new Leg(pouch, 90), new Leg(holding, 10)),
+        earner, new TaxLeg(holding, 10)));
+    assertFalse(ledger.isOpen());
+    ledger = open();
+    assertEquals(0, ledger.balance(MINT));
+    assertEquals(0, ledger.balance(pouch));
+    assertEquals(0, ledger.balance(holding));
+    assertEquals(Optional.empty(), ledger.status("tax"));
+    assertTrue(ledger.taxContributors(incarnation).isEmpty());
+  }
+
+  @Test
+  void taxAttributionMustMatchTheCharacterAndNetHoldingCredit() {
+    UUID incarnation = UUID.randomUUID();
+    UUID earner = UUID.randomUUID();
+    String holding = AccountIds.guildTax(incarnation);
+    List<Leg> legs = List.of(new Leg(MINT, -100), new Leg(AccountIds.pouch(earner), 90), new Leg(holding, 10));
+    assertThrows(IllegalArgumentException.class,
+        () -> ledger.postEarning("tax", "earn", legs, earner, new TaxLeg(holding, 11)));
+    assertThrows(IllegalArgumentException.class,
+        () -> ledger.postEarning("tax", "earn", legs, earner, new TaxLeg(AccountIds.guildTax(UUID.randomUUID()), 10)));
+    assertThrows(IllegalArgumentException.class,
+        () -> ledger.postEarning("tax", "earn", legs, null, new TaxLeg(holding, 10)));
+    assertThrows(IllegalArgumentException.class,
+        () -> ledger.postEarning("tax", "earn", List.of(new Leg(MINT, Long.MIN_VALUE),
+            new Leg(holding, Long.MAX_VALUE), new Leg(holding, 1)), earner, new TaxLeg(holding, 10)));
+    assertEquals(Optional.empty(), ledger.status("tax"));
+    assertEquals(0, ledger.balance(holding));
+    assertTrue(ledger.taxContributors(incarnation).isEmpty());
+  }
+
+  @Test
+  void attributedRetriesCannotChangeTheEarnerOrTaxAccount() {
+    UUID first = UUID.randomUUID(), second = UUID.randomUUID(), earner = UUID.randomUUID();
+    String holding = AccountIds.guildTax(first), other = AccountIds.guildTax(second);
+    List<Leg> legs = List.of(new Leg(MINT, -200), new Leg(holding, 100), new Leg(other, 100));
+    TaxLeg tax = new TaxLeg(holding, 100);
+    assertEquals(Result.APPLIED, ledger.postEarning("tax", "earn", legs, earner, tax));
+    assertEquals(Result.CONFLICT, ledger.postEarning("tax", "earn", legs, UUID.randomUUID(), tax));
+    assertEquals(Result.CONFLICT, ledger.postEarning("tax", "earn", legs, earner, null));
+    assertEquals(Result.CONFLICT, ledger.post("tax", "earn", legs));
+    assertEquals(Result.CONFLICT, ledger.postEarning("tax", "earn", legs, earner, new TaxLeg(other, 100)));
+    assertEquals(Result.APPLIED, ledger.postEarning("tax", "earn", legs, earner, tax));
+    assertEquals(Map.of(earner, 100L), ledger.taxContributors(first));
+    assertTrue(ledger.taxContributors(second).isEmpty());
+    // The same legs from an older provider still retain their saved result without invented names.
+    assertEquals(Result.APPLIED, ledger.post("legacy", "earn", legs));
+    assertEquals(Result.APPLIED, ledger.postEarning("legacy", "earn", legs, earner, tax));
+    assertEquals(Map.of(earner, 100L), ledger.taxContributors(first));
   }
 
   @Test
