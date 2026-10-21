@@ -21,6 +21,10 @@ Money belongs to characters: each character has its own pouch and bank, and swit
 
 ## Documentation
 
+Recovered Archaeo artifacts are excluded from currency recognition, pickup, and
+right-click bank deposits. A gold ingot or nugget carrying an excavation record
+stays an artifact; ordinary configured currency materials continue to work.
+
 [Project documentation](https://github.com/TF-Minecraft/Docs/blob/main/projects/DenarEconomy/README.md)
 
 Technical documentation is maintained in [TF-Minecraft/Docs](https://github.com/TF-Minecraft/Docs).
