@@ -62,6 +62,7 @@ import net.tfminecraft.denareconomy.event.PlayerDepositMaterialsEvent;
 import net.tfminecraft.tlibs.character.CharacterRef;
 
 public class MoneyManager implements Listener{
+	private static final NamespacedKey RECOVERED_FIND = new NamespacedKey("archaeo", "recovered_find");
 	private final Map<UUID, ArmorStand> standMap = new HashMap<>();
 	private final Map<UUID, Integer> taskMap = new HashMap<>();
 	private final Map<UUID, Long> pouchCooldown = new HashMap<>();
@@ -79,11 +80,18 @@ public class MoneyManager implements Listener{
 
 	
 	public Coin getCoin(ItemStack i) {
+		if (isRecoveredArtifact(i)) return null;
 		ItemAPI api = TLibs.getItemAPI();
 		for(Coin c : CoinLoader.get()) {
 			if(api.getChecker().checkItemWithPath(i, c.getItem())) return c;
 		}
 		return null;
+	}
+
+	/** Archived finds keep their identity even when their base material is bankable. */
+	static boolean isRecoveredArtifact(ItemStack item) {
+		return item != null && item.hasItemMeta()
+				&& item.getItemMeta().getPersistentDataContainer().has(RECOVERED_FIND);
 	}
 	
 	public double combinedValue(Coin c, ItemStack i) {
@@ -513,7 +521,7 @@ public class MoneyManager implements Listener{
 		if(e.getHand() != EquipmentSlot.HAND) return;
 		Player p = e.getPlayer();
 		ItemStack i = p.getInventory().getItemInMainHand();
-		if(i == null || i.getType().equals(Material.AIR)) return;
+		if(i == null || i.getType().equals(Material.AIR) || isRecoveredArtifact(i)) return;
 		Optional<CharacterRef> character = Denars.active(p);
 		if (character.isEmpty()) return;
 		PlayerDepositMaterialsEvent event = new PlayerDepositMaterialsEvent(p, i, character.get());
