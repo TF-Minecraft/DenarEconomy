@@ -6,6 +6,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 
 import net.tfminecraft.denareconomy.accounts.OfflineModifier;
 import net.tfminecraft.denareconomy.estate.EstateSupport;
@@ -32,6 +33,7 @@ public class DenarEconomy extends JavaPlugin {
 	private static final PlayerManager playerManager = new PlayerManager();
 	private static final MoneyManager moneyManager = new MoneyManager();
 	private static Ledger ledger = Ledger.unavailable();
+	private BukkitTask checkpoints;
 	
 	@Override
 	public void onEnable() {
@@ -40,6 +42,9 @@ public class DenarEconomy extends JavaPlugin {
 		createConfigs();
 		loadConfigs();
 		ledger = Ledger.open(new File(getDataFolder(), "ledger.db"), getLogger(), AccountIds::frozen);
+		// Commits are not synced one by one; this bounds what an OS crash can roll back (see Ledger).
+		checkpoints = Bukkit.getScheduler().runTaskTimer(this, () -> ledger.checkpoint(),
+				Ledger.CHECKPOINT_TICKS, Ledger.CHECKPOINT_TICKS);
 		LegacyMigration migration = new LegacyMigration(ledger, getDataFolder(), getLogger());
 		migration.importFiles();
 		registerListeners();
@@ -58,6 +63,11 @@ public class DenarEconomy extends JavaPlugin {
 
 	@Override
 	public void onDisable(){
+		if (checkpoints != null) {
+			checkpoints.cancel();
+			checkpoints = null;
+		}
+		ledger.checkpoint();
 		ledger.close();
 		for (ArmorStand stand : moneyManager.getStandMap().values()) {
 			if (stand != null && !stand.isDead()) stand.remove();

@@ -96,6 +96,13 @@ class DenarEconomyTest {
           plugin.getCommand("pouch").getExecutor(), plugin.getCommand("pouch").getTabCompleter());
       assertTrue(new File(plugin.getDataFolder(), "ledger.db").isFile());
       assertTrue(DenarEconomy.getLedger().isOpen());
+      java.lang.reflect.Field timer = DenarEconomy.class.getDeclaredField("checkpoints");
+      timer.setAccessible(true);
+      org.bukkit.scheduler.BukkitTask checkpoints = (org.bukkit.scheduler.BukkitTask) timer.get(plugin);
+      assertNotNull(checkpoints);
+      assertFalse(checkpoints.isCancelled());
+      server.getScheduler().performTicks(Ledger.CHECKPOINT_TICKS);
+      assertTrue(DenarEconomy.getLedger().isOpen());
       assertInstanceOf(
           net.tfminecraft.denareconomy.ledger.MoneyEstates.class,
           Bukkit.getServicesManager()
@@ -127,6 +134,8 @@ class DenarEconomyTest {
         bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
         plugin.onDisable();
         assertFalse(ledger.isOpen());
+        assertTrue(checkpoints.isCancelled());
+        assertNull(timer.get(plugin));
         verify(live).remove();
         verify(dead, never()).remove();
         verify(scheduler).cancelTask(17);

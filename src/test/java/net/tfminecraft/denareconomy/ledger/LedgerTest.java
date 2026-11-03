@@ -108,6 +108,48 @@ class LedgerTest {
   }
 
   @Test
+  void writesWithNormalSyncAndCheckpointsCommittedPostingsUntilClosed() {
+    assertEquals(1, ledger.synchronousLevel(), "WAL with synchronous=NORMAL");
+    String pouch = pouch();
+    assertEquals(Result.APPLIED, move("op-sync", "earn", MINT, pouch, 125));
+    assertTrue(ledger.checkpoint());
+    assertTrue(ledger.checkpoint());
+    assertEquals(125, ledger.balance(pouch));
+    assertFalse(severe());
+    ledger.close();
+    assertFalse(ledger.checkpoint());
+    assertEquals(-1, ledger.synchronousLevel());
+    ledger = open();
+    assertEquals(125, ledger.balance(pouch));
+  }
+
+  @Test
+  void aFailedCheckpointIsLoggedOnceKeepsTheLedgerOpenAndRecovers() throws Exception {
+    java.lang.reflect.Field field = Ledger.class.getDeclaredField("database");
+    field.setAccessible(true);
+    ((net.tfminecraft.tlibs.database.SqliteDatabase) field.get(ledger)).close();
+    var database = org.mockito.Mockito.mock(net.tfminecraft.tlibs.database.SqliteDatabase.class);
+    Connection connection = org.mockito.Mockito.mock(Connection.class);
+    Statement statement = org.mockito.Mockito.mock(Statement.class);
+    org.mockito.Mockito.when(database.getConnection()).thenReturn(connection);
+    org.mockito.Mockito.when(connection.createStatement())
+        .thenThrow(new java.sql.SQLException("disk I/O error"))
+        .thenThrow(new java.sql.SQLException("disk I/O error"))
+        .thenReturn(statement);
+    field.set(ledger, database);
+    assertFalse(ledger.checkpoint());
+    assertFalse(ledger.checkpoint());
+    assertTrue(ledger.isOpen(), "a failed checkpoint does not close money");
+    assertEquals(1, logs.stream().filter(r -> r.getLevel() == Level.WARNING).count());
+    assertTrue(ledger.checkpoint());
+    assertTrue(ledger.checkpoint());
+    org.mockito.Mockito.verify(statement, org.mockito.Mockito.times(2)).execute("PRAGMA wal_checkpoint(PASSIVE)");
+    assertEquals(
+        1, logs.stream().filter(r -> r.getMessage().equals("Ledger checkpoints work again")).count());
+    assertFalse(severe());
+  }
+
+  @Test
   void retryingAnOperationReturnsItsFirstResultWithoutApplyingAgain() {
     String pouch = pouch();
     assertEquals(Result.APPLIED, move("coin:1", "earn", MINT, pouch, 100));

@@ -35,11 +35,18 @@ import net.tfminecraft.tlibs.database.SqliteDatabase;
  *
  * <p>After any SQLite error the ledger closes and refuses everything until the plugin restarts.
  * It never falls back to memory.
+ *
+ * <p>Durability: the write-ahead log runs with {@code synchronous=NORMAL}, so a commit is not
+ * synced on its own. SQLite syncs the log before every checkpoint (and the database file after
+ * it), and the plugin checkpoints every {@link #CHECKPOINT_TICKS} ticks. A crash or kill of the
+ * server process loses nothing; only an operating-system crash or power loss can roll back the
+ * postings committed since the last checkpoint (about ten seconds). The database never corrupts
+ * and an operation ID never applies twice.
  */
 public final class Ledger {
 	private static final String[] SCHEMA = {
 		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=FULL",
+		"PRAGMA synchronous=NORMAL",
 		"CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, kind TEXT NOT NULL, owner TEXT,"
 				+ " character TEXT, label TEXT, cents INTEGER NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS operations(op_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,"
@@ -82,9 +89,13 @@ public final class Ledger {
 		T run(Connection connection) throws SQLException;
 	}
 
+	/** Ticks between checkpoints: about ten seconds, the most an OS crash or power loss can roll back. */
+	public static final long CHECKPOINT_TICKS = 20L * 10;
+
 	private final Logger log;
 	private final Predicate<String> frozen;
 	private SqliteDatabase database;
+	private boolean checkpointFailing;
 
 	private Ledger(Logger log, Predicate<String> frozen) {
 		this.log = log;
@@ -304,6 +315,49 @@ public final class Ledger {
 					posting.legs().put(row.getString(4), row.getLong(5));
 				}
 				return List.copyOf(postings.values());
+			}
+		});
+	}
+
+	/**
+	 * Copies committed postings from the write-ahead log into the database file. SQLite syncs the
+	 * log before the copy, so every posting committed before this call is then on disk.
+	 *
+	 * <p>A failed checkpoint is only logged, once until one works again: every committed posting
+	 * stays in the log, readable, and the next checkpoint retries. The ledger stays open, since a
+	 * disk that really fails also fails the next posting, which closes it.
+	 *
+	 * @return whether the checkpoint ran; false when closed or when it failed
+	 */
+	public boolean checkpoint() {
+		requireMainThread();
+		if (database == null) {
+			return false;
+		}
+		try (Statement statement = database.getConnection().createStatement()) {
+			statement.execute("PRAGMA wal_checkpoint(PASSIVE)");
+		} catch (SQLException e) {
+			if (!checkpointFailing) {
+				log.log(Level.WARNING, "Ledger checkpoint failed; committed postings stay in the write-ahead log"
+						+ " and the checkpoint is retried", e);
+			}
+			checkpointFailing = true;
+			return false;
+		}
+		if (checkpointFailing) {
+			log.info("Ledger checkpoints work again");
+			checkpointFailing = false;
+		}
+		return true;
+	}
+
+	/** The connection's {@code PRAGMA synchronous} level (1 = NORMAL), or -1 when closed. For tests. */
+	int synchronousLevel() {
+		return run("reading the sync level", -1, connection -> {
+			try (Statement statement = connection.createStatement();
+					ResultSet row = statement.executeQuery("PRAGMA synchronous")) {
+				row.next();
+				return row.getInt(1);
 			}
 		});
 	}
