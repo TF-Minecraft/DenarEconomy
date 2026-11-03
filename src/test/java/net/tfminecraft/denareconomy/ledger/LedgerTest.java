@@ -136,7 +136,9 @@ class LedgerTest {
         Statement statement = connection.createStatement();
         ResultSet plan =
             statement.executeQuery(
-                "EXPLAIN QUERY PLAN SELECT -SUM(cents) FROM legs WHERE op_id = 'x' AND cents < 0")) {
+                "EXPLAIN QUERY PLAN SELECT o.op_id, o.status, COALESCE((SELECT -SUM(l.cents) FROM legs l"
+                    + " WHERE l.op_id = o.op_id AND l.cents < 0), 0) FROM operations o"
+                    + " WHERE o.op_id >= 'estate:' AND o.op_id < 'estate;'")) {
       StringBuilder steps = new StringBuilder();
       while (plan.next()) steps.append(plan.getString("detail")).append('\n');
       assertTrue(steps.toString().contains("legs_by_op"), steps.toString());
