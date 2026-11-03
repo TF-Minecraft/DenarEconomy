@@ -61,6 +61,9 @@ public final class Ledger {
 				+ " status TEXT NOT NULL, created INTEGER NOT NULL, reason TEXT NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS legs(op_id TEXT NOT NULL, account TEXT NOT NULL, cents INTEGER NOT NULL)",
 		"CREATE INDEX IF NOT EXISTS legs_by_account ON legs(account)",
+		// The estate sweep sums each estate operation's legs by op_id every hour. Without this
+		// index that subquery scanned every leg ever posted (~0.4 s on Main's 117 MB ledger).
+		"CREATE INDEX IF NOT EXISTS legs_by_op ON legs(op_id)",
 		"CREATE TABLE IF NOT EXISTS tax_earnings(op_id TEXT PRIMARY KEY, account TEXT NOT NULL,"
 				+ " character TEXT NOT NULL, cents INTEGER NOT NULL)"
 	};
