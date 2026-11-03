@@ -108,6 +108,42 @@ class LedgerTest {
   }
 
   @Test
+  void anOlderDatabaseGetsTheLegsByOperationIndexAndEstateReadsUseIt() throws Exception {
+    UUID death = UUID.randomUUID();
+    String op = "estate:" + death + ":1";
+    ledger.close();
+    try (Connection connection = direct(); Statement statement = connection.createStatement()) {
+      statement.execute("DROP INDEX legs_by_op");
+      // An estate sweep as an older jar stored it: pouch and bank debited, heir credited.
+      statement.execute(
+          "INSERT INTO operations(op_id, fingerprint, status, created, reason) VALUES ('"
+              + op
+              + "', 'x', 'APPLIED', 0, 'estate')");
+      statement.execute(
+          "INSERT INTO legs(op_id, account, cents) VALUES ('"
+              + op
+              + "', 'p', -200), ('"
+              + op
+              + "', 'b', -100), ('"
+              + op
+              + "', 'h', 300), ('other', 'p', -999)");
+    }
+    ledger = open();
+    assertEquals(
+        List.of(new Ledger.EstatePosting(op, 1, Result.APPLIED, 300)),
+        ledger.estatePostings(death));
+    try (Connection connection = direct();
+        Statement statement = connection.createStatement();
+        ResultSet plan =
+            statement.executeQuery(
+                "EXPLAIN QUERY PLAN SELECT -SUM(cents) FROM legs WHERE op_id = 'x' AND cents < 0")) {
+      StringBuilder steps = new StringBuilder();
+      while (plan.next()) steps.append(plan.getString("detail")).append('\n');
+      assertTrue(steps.toString().contains("legs_by_op"), steps.toString());
+    }
+  }
+
+  @Test
   void retryingAnOperationReturnsItsFirstResultWithoutApplyingAgain() {
     String pouch = pouch();
     assertEquals(Result.APPLIED, move("coin:1", "earn", MINT, pouch, 100));
