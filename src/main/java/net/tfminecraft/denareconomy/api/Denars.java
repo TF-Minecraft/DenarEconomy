@@ -124,18 +124,29 @@ public final class Denars {
 	 */
 	public static Result earn(String opId, CharacterRef earner, String account, long cents, boolean taxable) {
 		Ledger.requireMainThread();
-		return pay(opId, "earn", MINT, earner, account, cents, taxable);
+		return pay(opId, "earn", MINT, earner, account, cents, taxable, false);
+	}
+
+	/**
+	 * {@link #earn} for DenarEconomy's own coin pickups only. Its commit is not synced on its own:
+	 * it is on disk after the next synced posting or ledger checkpoint, a few seconds later. Other
+	 * plugins must use {@link #earn}, because their journals rely on an applied posting being on
+	 * disk already.
+	 */
+	public static Result earnPickedUpCoin(String opId, CharacterRef earner, String account, long cents, boolean taxable) {
+		Ledger.requireMainThread();
+		return pay(opId, "earn", MINT, earner, account, cents, taxable, true);
 	}
 
 	/** A sale: the buyer pays the seller, less tax on the seller's earning when taxable. */
 	public static Result trade(String opId, String reason, String buyerAccount, CharacterRef seller,
 			String sellerAccount, long cents, boolean taxable) {
 		Ledger.requireMainThread();
-		return pay(opId, reason, buyerAccount, seller, sellerAccount, cents, taxable);
+		return pay(opId, reason, buyerAccount, seller, sellerAccount, cents, taxable, false);
 	}
 
 	private static Result pay(String opId, String reason, String from, CharacterRef earner, String to, long cents,
-			boolean taxable) {
+			boolean taxable, boolean relaxed) {
 		requirePositive(cents);
 		// Refused before any tax policy runs; the ledger would refuse it too.
 		if (Ledger.reserved(opId) || Ledger.reserved(reason)) return Result.UNAVAILABLE;
@@ -148,7 +159,7 @@ public final class Denars {
 		}
 		legs.add(new Leg(to, cents - taxCents));
 		tax.ifPresent(leg -> legs.add(new Leg(leg.account(), leg.cents())));
-		Result result = DenarEconomy.getLedger().postEarning(opId, reason, legs, earner.characterId(), tax.orElse(null));
+		Result result = DenarEconomy.getLedger().postEarning(opId, reason, legs, earner.characterId(), tax.orElse(null), relaxed);
 		if (taxable && result == Result.APPLIED) {
 			Bukkit.getPluginManager().callEvent(new PlayerEarnMoneyEvent(
 					Bukkit.getOfflinePlayer(earner.ownerId()).getName(), cents / 100.0, earner));
