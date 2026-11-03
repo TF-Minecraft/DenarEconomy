@@ -183,22 +183,40 @@ public final class Ledger {
 			}
 		}
 		return run("posting " + opId, Result.UNAVAILABLE, connection -> {
-			if (relaxed) {
-				setSynchronous(connection, "NORMAL");
+			if (!relaxed) {
+				return transaction(connection, opId, reason, prepared, earner, tax);
 			}
+			setSynchronous(connection, "NORMAL");
+			Result result;
 			try {
-				connection.setAutoCommit(false);
-				Result result = apply(connection, opId, reason, prepared.fingerprint(), prepared.changes(), earner, tax);
-				connection.commit();
-				connection.setAutoCommit(true);
-				return result;
-			} finally {
-				if (relaxed) {
-					// Back to synced commits before anything else posts. A failure here closes the ledger.
+				result = transaction(connection, opId, reason, prepared, earner, tax);
+			} catch (SQLException | RuntimeException | Error e) {
+				// The level can only change outside a transaction: end the failed one first, so the
+				// original failure is the one reported (and an SQLException still closes the ledger).
+				try {
+					if (!connection.getAutoCommit()) {
+						connection.rollback();
+						connection.setAutoCommit(true);
+					}
 					setSynchronous(connection, "FULL");
+				} catch (SQLException restore) {
+					e.addSuppressed(restore);
 				}
+				throw e;
 			}
+			// Back to synced commits before anything else posts. A failure here closes the ledger.
+			setSynchronous(connection, "FULL");
+			return result;
 		});
+	}
+
+	private Result transaction(Connection connection, String opId, String reason, Prepared prepared, UUID earner,
+			TaxLeg tax) throws SQLException {
+		connection.setAutoCommit(false);
+		Result result = apply(connection, opId, reason, prepared.fingerprint(), prepared.changes(), earner, tax);
+		connection.commit();
+		connection.setAutoCommit(true);
+		return result;
 	}
 
 	private static void setSynchronous(Connection connection, String level) throws SQLException {
@@ -368,8 +386,13 @@ public final class Ledger {
 		if (database == null) {
 			return false;
 		}
-		try (Statement statement = database.getConnection().createStatement()) {
-			statement.execute("PRAGMA wal_checkpoint(PASSIVE)");
+		try (Statement statement = database.getConnection().createStatement();
+				ResultSet row = statement.executeQuery("PRAGMA wal_checkpoint(PASSIVE)")) {
+			// Columns: busy, log frames, checkpointed frames. A PASSIVE checkpoint reports a busy
+			// database here instead of throwing; nothing was synced then, so it counts as a retry.
+			if (row.next() && row.getInt(1) != 0) {
+				throw new SQLException("The ledger database is busy", null, SQLITE_BUSY);
+			}
 		} catch (SQLException e) {
 			int code = e.getErrorCode() & 0xff;
 			if (code != SQLITE_BUSY && code != SQLITE_LOCKED) {

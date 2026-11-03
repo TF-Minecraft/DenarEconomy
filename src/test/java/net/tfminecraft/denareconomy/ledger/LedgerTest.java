@@ -191,6 +191,110 @@ class LedgerTest {
   }
 
   @Test
+  void aCheckpointReportingABusyDatabaseCountsAsARetry() throws Exception {
+    java.lang.reflect.Field field = Ledger.class.getDeclaredField("database");
+    field.setAccessible(true);
+    var real = (net.tfminecraft.tlibs.database.SqliteDatabase) field.get(ledger);
+    var database = org.mockito.Mockito.mock(net.tfminecraft.tlibs.database.SqliteDatabase.class);
+    Connection connection = org.mockito.Mockito.mock(Connection.class);
+    Statement statement = org.mockito.Mockito.mock(Statement.class);
+    ResultSet busy = org.mockito.Mockito.mock(ResultSet.class);
+    org.mockito.Mockito.when(database.getConnection()).thenReturn(connection);
+    org.mockito.Mockito.when(connection.createStatement()).thenReturn(statement);
+    org.mockito.Mockito.when(statement.executeQuery("PRAGMA wal_checkpoint(PASSIVE)")).thenReturn(busy);
+    org.mockito.Mockito.when(busy.next()).thenReturn(true, true, false);
+    org.mockito.Mockito.when(busy.getInt(1)).thenReturn(1, 0);
+    field.set(ledger, database);
+    assertFalse(ledger.checkpoint());
+    assertTrue(ledger.isOpen());
+    assertEquals(1, logs.stream().filter(r -> r.getLevel() == Level.WARNING).count());
+    assertTrue(ledger.checkpoint());
+    assertTrue(ledger.checkpoint(), "no result row is no busy report");
+    assertFalse(severe());
+    field.set(ledger, real);
+  }
+
+  @Test
+  void aRelaxedPostingThatFailsReportsItsOwnErrorAndClosesTheLedger() throws Exception {
+    java.lang.reflect.Field field = Ledger.class.getDeclaredField("database");
+    field.setAccessible(true);
+    var real = (net.tfminecraft.tlibs.database.SqliteDatabase) field.get(ledger);
+    Connection spy = org.mockito.Mockito.spy(real.getConnection());
+    var database = org.mockito.Mockito.mock(net.tfminecraft.tlibs.database.SqliteDatabase.class);
+    org.mockito.Mockito.when(database.getConnection()).thenReturn(spy);
+    field.set(ledger, database);
+    String pouch = pouch();
+    // SQLITE_FULL (13) at commit: the failed transaction is rolled back so the level goes back to FULL.
+    org.mockito.Mockito.doThrow(new java.sql.SQLException("database or disk is full", null, 13))
+        .when(spy)
+        .commit();
+    assertEquals(
+        Result.UNAVAILABLE,
+        ledger.postEarning(
+            "coin:full", "earn", List.of(new Leg(MINT, -5), new Leg(pouch, 5)), null, null, true));
+    assertFalse(ledger.isOpen());
+    LogRecord closed =
+        logs.stream().filter(r -> r.getLevel() == Level.SEVERE).findFirst().orElseThrow();
+    assertEquals("database or disk is full", closed.getThrown().getMessage());
+    assertEquals(0, closed.getThrown().getSuppressed().length);
+    ledger = open();
+    assertEquals(2, ledger.synchronousLevel());
+    assertEquals(0, ledger.balance(pouch), "the failed posting left nothing behind");
+    real.close();
+  }
+
+  @Test
+  void aRelaxedPostingKeepsItsOwnErrorWhenTheRollbackFailsToo() throws Exception {
+    java.lang.reflect.Field field = Ledger.class.getDeclaredField("database");
+    field.setAccessible(true);
+    var real = (net.tfminecraft.tlibs.database.SqliteDatabase) field.get(ledger);
+    Connection spy = org.mockito.Mockito.spy(real.getConnection());
+    var database = org.mockito.Mockito.mock(net.tfminecraft.tlibs.database.SqliteDatabase.class);
+    org.mockito.Mockito.when(database.getConnection()).thenReturn(spy);
+    field.set(ledger, database);
+    org.mockito.Mockito.doThrow(new java.sql.SQLException("disk I/O error", null, 10)).when(spy).commit();
+    org.mockito.Mockito.doThrow(new java.sql.SQLException("cannot roll back")).when(spy).rollback();
+    String pouch = pouch();
+    assertEquals(
+        Result.UNAVAILABLE,
+        ledger.postEarning(
+            "coin:io", "earn", List.of(new Leg(MINT, -5), new Leg(pouch, 5)), null, null, true));
+    LogRecord closed =
+        logs.stream().filter(r -> r.getLevel() == Level.SEVERE).findFirst().orElseThrow();
+    assertEquals("disk I/O error", closed.getThrown().getMessage());
+    assertEquals("cannot roll back", closed.getThrown().getSuppressed()[0].getMessage());
+    org.mockito.Mockito.doCallRealMethod().when(spy).rollback();
+    spy.rollback();
+    real.close();
+  }
+
+  @Test
+  void aRelaxedPostingThatFailsBeforeItsTransactionStartsStillGoesBackToFullSync() throws Exception {
+    java.lang.reflect.Field field = Ledger.class.getDeclaredField("database");
+    field.setAccessible(true);
+    var real = (net.tfminecraft.tlibs.database.SqliteDatabase) field.get(ledger);
+    Connection spy = org.mockito.Mockito.spy(real.getConnection());
+    var database = org.mockito.Mockito.mock(net.tfminecraft.tlibs.database.SqliteDatabase.class);
+    org.mockito.Mockito.when(database.getConnection()).thenReturn(spy);
+    field.set(ledger, database);
+    org.mockito.Mockito.doThrow(new java.sql.SQLException("cannot begin"))
+        .when(spy)
+        .setAutoCommit(false);
+    String pouch = pouch();
+    assertEquals(
+        Result.UNAVAILABLE,
+        ledger.postEarning(
+            "coin:begin", "earn", List.of(new Leg(MINT, -5), new Leg(pouch, 5)), null, null, true));
+    org.mockito.Mockito.verify(spy, org.mockito.Mockito.never()).rollback();
+    try (Statement statement = real.getConnection().createStatement();
+        ResultSet level = statement.executeQuery("PRAGMA synchronous")) {
+      level.next();
+      assertEquals(2, level.getInt(1), "the level went back to FULL");
+    }
+    real.close();
+  }
+
+  @Test
   void aBusyCheckpointIsLoggedOnceKeepsTheLedgerOpenAndRecovers() throws Exception {
     java.lang.reflect.Field field = Ledger.class.getDeclaredField("database");
     field.setAccessible(true);
@@ -204,6 +308,9 @@ class LedgerTest {
         // SQLITE_LOCKED_SHAREDCACHE (262): primary code 6.
         .thenThrow(new java.sql.SQLException("database table is locked", null, 262))
         .thenReturn(statement);
+    ResultSet done = org.mockito.Mockito.mock(ResultSet.class);
+    org.mockito.Mockito.when(done.next()).thenReturn(true);
+    org.mockito.Mockito.when(statement.executeQuery("PRAGMA wal_checkpoint(PASSIVE)")).thenReturn(done);
     field.set(ledger, database);
     assertFalse(ledger.checkpoint());
     assertFalse(ledger.checkpoint());
@@ -211,7 +318,8 @@ class LedgerTest {
     assertEquals(1, logs.stream().filter(r -> r.getLevel() == Level.WARNING).count());
     assertTrue(ledger.checkpoint());
     assertTrue(ledger.checkpoint());
-    org.mockito.Mockito.verify(statement, org.mockito.Mockito.times(2)).execute("PRAGMA wal_checkpoint(PASSIVE)");
+    org.mockito.Mockito.verify(statement, org.mockito.Mockito.times(2))
+        .executeQuery("PRAGMA wal_checkpoint(PASSIVE)");
     assertEquals(
         1, logs.stream().filter(r -> r.getMessage().equals("Ledger checkpoints work again")).count());
     assertFalse(severe());
