@@ -156,6 +156,24 @@ class DenarsTest {
   }
 
   @Test
+  void aPickedUpCoinIsEarnedLikeAnyEarning() {
+    UUID incarnation = UUID.randomUUID();
+    String holding = Denars.guildTax(incarnation);
+    taxAt(25, holding);
+    assertEquals(
+        Result.APPLIED,
+        Denars.earnPickedUpCoin("coin:c", character, Denars.pouch(character), 1000, true));
+    assertEquals(750, Denars.balance(Denars.pouch(character)));
+    assertEquals(250, Denars.balance(holding));
+    assertEquals(-1000, Denars.balance(Denars.MINT));
+    assertEquals(1, earned.size());
+    assertEquals(
+        Result.APPLIED,
+        Denars.earnPickedUpCoin("coin:c", character, Denars.pouch(character), 1000, true));
+    assertEquals(750, Denars.balance(Denars.pouch(character)));
+  }
+
+  @Test
   void taxableEarningsWithoutAPolicyAreUntaxedButAnnounced() {
     assertEquals(0, Denars.taxFor(character, 1000));
     assertEquals(Result.APPLIED, Denars.earn("e", character, Denars.pouch(character), 1000, true));

@@ -263,9 +263,11 @@ public class MoneyManager implements Listener{
 
 	/** Credits new money and tells the player what arrived and what was taxed, unless silent. */
 	private Result earn(Player p, CharacterRef character, String opId, String account, long cents,
-			boolean silent, boolean taxable) {
+			boolean silent, boolean taxable, boolean coinPickup) {
 		long tax = taxable ? Denars.taxFor(character, cents) : 0;
-		Result result = Denars.earn(opId, character, account, cents, taxable);
+		Result result = coinPickup
+				? Denars.earnPickedUpCoin(opId, character, account, cents, taxable)
+				: Denars.earn(opId, character, account, cents, taxable);
 		if (result == Result.APPLIED && !silent) tellEarned(p, cents - tax, tax);
 		return result;
 	}
@@ -559,7 +561,7 @@ public class MoneyManager implements Listener{
 		// come back if an unclean shutdown rolls the player file back after the credit commits.
 		p.getInventory().setItemInMainHand(null);
 		p.saveData();
-		Result result = earn(p, ref, once("topouch"), Denars.pouch(ref), cents, false, false);
+		Result result = earn(p, ref, once("topouch"), Denars.pouch(ref), cents, false, false, false);
 		if (result != Result.APPLIED) {
 			p.getInventory().setItemInMainHand(held);
 			p.saveData();
@@ -660,7 +662,7 @@ public class MoneyManager implements Listener{
 		boolean silent = data.has(new NamespacedKey(DenarEconomy.plugin, "silent"), PersistentDataType.INTEGER);
 
 		Result result = cents > 0
-				? earn(p, ref, "coin:" + entity.getUniqueId(), Denars.pouch(ref), cents, silent, taxable)
+				? earn(p, ref, "coin:" + entity.getUniqueId(), Denars.pouch(ref), cents, silent, taxable, true)
 				: Result.APPLIED;
 		// CONFLICT: this coin was posted before with other legs. Only a stored APPLIED proves it was paid.
 		if (result == Result.CONFLICT) {

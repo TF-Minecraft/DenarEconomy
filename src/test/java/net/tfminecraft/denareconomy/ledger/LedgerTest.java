@@ -108,23 +108,90 @@ class LedgerTest {
   }
 
   @Test
-  void writesWithNormalSyncAndCheckpointsCommittedPostingsUntilClosed() {
-    assertEquals(1, ledger.synchronousLevel(), "WAL with synchronous=NORMAL");
+  void writesWithFullSyncAndCheckpointsCommittedPostingsUntilClosed() {
+    assertEquals(2, ledger.synchronousLevel(), "WAL with synchronous=FULL");
     String pouch = pouch();
     assertEquals(Result.APPLIED, move("op-sync", "earn", MINT, pouch, 125));
+    assertEquals(
+        Result.APPLIED,
+        ledger.postEarning(
+            "coin:relaxed", "earn", List.of(new Leg(MINT, -75), new Leg(pouch, 75)), null, null, true));
+    assertEquals(2, ledger.synchronousLevel(), "a relaxed posting puts FULL back");
     assertTrue(ledger.checkpoint());
     assertTrue(ledger.checkpoint());
-    assertEquals(125, ledger.balance(pouch));
+    assertEquals(200, ledger.balance(pouch));
     assertFalse(severe());
     ledger.close();
     assertFalse(ledger.checkpoint());
     assertEquals(-1, ledger.synchronousLevel());
     ledger = open();
-    assertEquals(125, ledger.balance(pouch));
+    assertEquals(200, ledger.balance(pouch));
   }
 
   @Test
-  void aFailedCheckpointIsLoggedOnceKeepsTheLedgerOpenAndRecovers() throws Exception {
+  void onlyARelaxedPostingCommitsWithoutItsOwnSync() throws Exception {
+    java.lang.reflect.Field field = Ledger.class.getDeclaredField("database");
+    field.setAccessible(true);
+    var real = (net.tfminecraft.tlibs.database.SqliteDatabase) field.get(ledger);
+    Connection spy = org.mockito.Mockito.spy(real.getConnection());
+    List<String> pragmas = new ArrayList<>();
+    org.mockito.Mockito.doAnswer(
+            call -> {
+              Statement statement = (Statement) call.callRealMethod();
+              // A recording proxy: Mockito spies break the driver's own statement fields.
+              return java.lang.reflect.Proxy.newProxyInstance(
+                  Statement.class.getClassLoader(),
+                  new Class<?>[] {Statement.class},
+                  (proxy, method, args) -> {
+                    if (method.getName().equals("execute")
+                        && args != null
+                        && args.length == 1
+                        && args[0] instanceof String sql
+                        && sql.startsWith("PRAGMA synchronous")) pragmas.add(sql);
+                    try {
+                      return method.invoke(statement, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                      throw e.getCause();
+                    }
+                  });
+            })
+        .when(spy)
+        .createStatement();
+    var database = org.mockito.Mockito.mock(net.tfminecraft.tlibs.database.SqliteDatabase.class);
+    org.mockito.Mockito.when(database.getConnection()).thenReturn(spy);
+    field.set(ledger, database);
+    String pouch = pouch();
+    assertEquals(Result.APPLIED, move("synced", "earn", MINT, pouch, 10));
+    assertTrue(pragmas.isEmpty(), "an ordinary posting keeps the synced default");
+    assertEquals(
+        Result.APPLIED,
+        ledger.postEarning(
+            "coin:x", "earn", List.of(new Leg(MINT, -5), new Leg(pouch, 5)), null, null, true));
+    assertEquals(List.of("PRAGMA synchronous=NORMAL", "PRAGMA synchronous=FULL"), pragmas);
+    assertEquals(15, ledger.balance(pouch));
+    field.set(ledger, real);
+  }
+
+  @Test
+  void aCheckpointFailingOnADiskErrorClosesTheLedger() throws Exception {
+    java.lang.reflect.Field field = Ledger.class.getDeclaredField("database");
+    field.setAccessible(true);
+    var real = (net.tfminecraft.tlibs.database.SqliteDatabase) field.get(ledger);
+    var database = org.mockito.Mockito.mock(net.tfminecraft.tlibs.database.SqliteDatabase.class);
+    Connection connection = org.mockito.Mockito.mock(Connection.class);
+    org.mockito.Mockito.when(database.getConnection()).thenReturn(connection);
+    // SQLITE_IOERR_FSYNC (1034): primary code 10, an I/O error.
+    org.mockito.Mockito.when(connection.createStatement())
+        .thenThrow(new java.sql.SQLException("disk I/O error", null, 1034));
+    field.set(ledger, database);
+    assertFalse(ledger.checkpoint());
+    assertFalse(ledger.isOpen(), "a disk error refuses postings like any other SQLite error");
+    assertTrue(severe());
+    real.close();
+  }
+
+  @Test
+  void aBusyCheckpointIsLoggedOnceKeepsTheLedgerOpenAndRecovers() throws Exception {
     java.lang.reflect.Field field = Ledger.class.getDeclaredField("database");
     field.setAccessible(true);
     ((net.tfminecraft.tlibs.database.SqliteDatabase) field.get(ledger)).close();
@@ -133,13 +200,14 @@ class LedgerTest {
     Statement statement = org.mockito.Mockito.mock(Statement.class);
     org.mockito.Mockito.when(database.getConnection()).thenReturn(connection);
     org.mockito.Mockito.when(connection.createStatement())
-        .thenThrow(new java.sql.SQLException("disk I/O error"))
-        .thenThrow(new java.sql.SQLException("disk I/O error"))
+        .thenThrow(new java.sql.SQLException("database is locked", null, Ledger.SQLITE_BUSY))
+        // SQLITE_LOCKED_SHAREDCACHE (262): primary code 6.
+        .thenThrow(new java.sql.SQLException("database table is locked", null, 262))
         .thenReturn(statement);
     field.set(ledger, database);
     assertFalse(ledger.checkpoint());
     assertFalse(ledger.checkpoint());
-    assertTrue(ledger.isOpen(), "a failed checkpoint does not close money");
+    assertTrue(ledger.isOpen(), "a busy checkpoint does not close money");
     assertEquals(1, logs.stream().filter(r -> r.getLevel() == Level.WARNING).count());
     assertTrue(ledger.checkpoint());
     assertTrue(ledger.checkpoint());

@@ -36,17 +36,25 @@ import net.tfminecraft.tlibs.database.SqliteDatabase;
  * <p>After any SQLite error the ledger closes and refuses everything until the plugin restarts.
  * It never falls back to memory.
  *
- * <p>Durability: the write-ahead log runs with {@code synchronous=NORMAL}, so a commit is not
- * synced on its own. SQLite syncs the log before every checkpoint (and the database file after
- * it), and the plugin checkpoints every {@link #CHECKPOINT_TICKS} ticks. A crash or kill of the
- * server process loses nothing; only an operating-system crash or power loss can roll back the
- * postings committed since the last checkpoint (about ten seconds). The database never corrupts
- * and an operation ID never applies twice.
+ * <p>Durability: the write-ahead log runs with {@code synchronous=FULL}, so a posting that answers
+ * {@link Result#APPLIED} is on disk. Other plugins rely on that: they keep their own journals and
+ * act on an applied posting. The one exception is a posting made with {@code relaxed} (only
+ * DenarEconomy's own coin pickups, most postings by count): it is committed without its own sync.
+ * A crash or kill of the server process still loses nothing, because the commit already reached
+ * the operating system. The next fully synced commit, or the checkpoint the plugin runs every
+ * {@link #CHECKPOINT_TICKS} ticks (SQLite syncs the log before copying it), puts it on disk, so an
+ * operating-system crash or power loss can only roll back relaxed postings from the last few
+ * seconds (about ten at full speed). The database never corrupts and an operation ID never
+ * applies twice.
  */
 public final class Ledger {
+	/** SQLite primary result codes a checkpoint may retry after. */
+	static final int SQLITE_BUSY = 5;
+	static final int SQLITE_LOCKED = 6;
+
 	private static final String[] SCHEMA = {
 		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
+		"PRAGMA synchronous=FULL",
 		"CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, kind TEXT NOT NULL, owner TEXT,"
 				+ " character TEXT, label TEXT, cents INTEGER NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS operations(op_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,"
@@ -152,6 +160,15 @@ public final class Ledger {
 
 	/** Posts an earning and its guild tax attribution in one transaction. Tax must match its net credit. */
 	public Result postEarning(String opId, String reason, List<Leg> legs, UUID earner, TaxLeg tax) {
+		return postEarning(opId, reason, legs, earner, tax, false);
+	}
+
+	/**
+	 * {@link #postEarning(String, String, List, UUID, TaxLeg)}; when {@code relaxed}, the commit is
+	 * not synced on its own and reaches the disk with the next synced commit or checkpoint (see the
+	 * class notes). Only for postings nothing outside this plugin acts on, like coin pickups.
+	 */
+	public Result postEarning(String opId, String reason, List<Leg> legs, UUID earner, TaxLeg tax, boolean relaxed) {
 		requireText(opId, "operation ID");
 		requireText(reason, "reason");
 		if (reserved(opId) || reserved(reason)) {
@@ -166,12 +183,28 @@ public final class Ledger {
 			}
 		}
 		return run("posting " + opId, Result.UNAVAILABLE, connection -> {
-			connection.setAutoCommit(false);
-			Result result = apply(connection, opId, reason, prepared.fingerprint(), prepared.changes(), earner, tax);
-			connection.commit();
-			connection.setAutoCommit(true);
-			return result;
+			if (relaxed) {
+				setSynchronous(connection, "NORMAL");
+			}
+			try {
+				connection.setAutoCommit(false);
+				Result result = apply(connection, opId, reason, prepared.fingerprint(), prepared.changes(), earner, tax);
+				connection.commit();
+				connection.setAutoCommit(true);
+				return result;
+			} finally {
+				if (relaxed) {
+					// Back to synced commits before anything else posts. A failure here closes the ledger.
+					setSynchronous(connection, "FULL");
+				}
+			}
 		});
+	}
+
+	private static void setSynchronous(Connection connection, String level) throws SQLException {
+		try (Statement statement = connection.createStatement()) {
+			statement.execute("PRAGMA synchronous=" + level);
+		}
 	}
 
 	/** Whether this operation ID or reason belongs to estate sweeps. */
@@ -323,9 +356,10 @@ public final class Ledger {
 	 * Copies committed postings from the write-ahead log into the database file. SQLite syncs the
 	 * log before the copy, so every posting committed before this call is then on disk.
 	 *
-	 * <p>A failed checkpoint is only logged, once until one works again: every committed posting
-	 * stays in the log, readable, and the next checkpoint retries. The ledger stays open, since a
-	 * disk that really fails also fails the next posting, which closes it.
+	 * <p>A checkpoint the database is too busy for is only logged, once until one works again: every
+	 * committed posting stays in the log, readable, and the next checkpoint retries. Any other
+	 * failure (a disk or I/O error) closes the ledger like every other SQLite error, since relaxed
+	 * postings would otherwise keep answering applied while nothing reaches the disk.
 	 *
 	 * @return whether the checkpoint ran; false when closed or when it failed
 	 */
@@ -337,6 +371,12 @@ public final class Ledger {
 		try (Statement statement = database.getConnection().createStatement()) {
 			statement.execute("PRAGMA wal_checkpoint(PASSIVE)");
 		} catch (SQLException e) {
+			int code = e.getErrorCode() & 0xff;
+			if (code != SQLITE_BUSY && code != SQLITE_LOCKED) {
+				log.log(Level.SEVERE, "Ledger checkpoint failed; refusing all postings until DenarEconomy restarts", e);
+				close();
+				return false;
+			}
 			if (!checkpointFailing) {
 				log.log(Level.WARNING, "Ledger checkpoint failed; committed postings stay in the write-ahead log"
 						+ " and the checkpoint is retried", e);
